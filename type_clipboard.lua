@@ -170,10 +170,17 @@ local function requestVariants()
   file:write(table.concat(prompt, "\n"), "\n")
   file:close()
 
+  -- Strip Claude Code's system prompt, tools, CLAUDE.md, skills and MCP config:
+  -- ~34.6k tokens per call down to ~3.5k, and thinking off drops output to ~36.
   local command = table.concat({
+    "MAX_THINKING_TOKENS=0",
     ("%q"):format(CLAUDE),
     "-p --model " .. MODEL,
     "--system-prompt " .. ("%q"):format(SYSTEM_PROMPT),
+    "--effort low --safe-mode --strict-mcp-config --disable-slash-commands",
+    "--setting-sources ''",
+    "--disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite",
+    "--no-session-persistence",
     "< " .. ("%q"):format(path),
   }, " ")
 
