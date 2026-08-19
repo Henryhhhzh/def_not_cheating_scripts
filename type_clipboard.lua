@@ -74,18 +74,20 @@ local function buildChunks(text)
     local take = math.random(WORDS_PER_CHUNK_MIN, WORDS_PER_CHUNK_MAX)
     local last = math.min(index + take - 1, #words)
     local core, tail = "", ""
-    for position = index, last do
+    local position = index
+    repeat
       core = core .. tail .. words[position].word
       tail = words[position].space
-    end
-    if core ~= "" then
+      position = position + 1
+    until position > last or tail:find("\n")
+    if core ~= "" or tail ~= "" then
       out[#out + 1] = {
         core = core,
         tail = tail,
         mistake = #core >= MIN_CORE_LENGTH and math.random() < MISTAKE_CHANCE,
       }
     end
-    index = last + 1
+    index = position
   end
   return out
 end
@@ -148,7 +150,11 @@ local function parseVariants(output, indices)
     return false
   end
   for position, index in ipairs(indices) do
-    variants[index] = lines[position]
+    local line = lines[position]
+    local core = chunks[index].core
+    if not line:find("\n") and math.abs(#line - #core) <= #core * 0.4 + 3 then
+      variants[index] = line
+    end
   end
   return true
 end
