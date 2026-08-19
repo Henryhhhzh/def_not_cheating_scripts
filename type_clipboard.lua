@@ -19,11 +19,13 @@ local RESUME_PAUSE_MIN, RESUME_PAUSE_MAX = 0.08, 0.25
 local CLAUDE = os.getenv("HOME") .. "/.local/bin/claude"
 local MODEL = "claude-haiku-4-5-20251001"
 local MAX_LINES_PER_CALL = 25
-local SYSTEM_PROMPT = "Rewrite each input line as the version a person would type first and then correct. "
-  .. "Usually a keyboard typo: adjacent-key slip, transposed letters, a doubled or dropped letter. "
-  .. "Sometimes instead a rougher wording or weaker synonym of the same thing. "
-  .. "Keep it recognisable and a similar length. Never substitute unrelated words. "
-  .. "Output only the rewritten lines, one per input line, same count, no numbering or commentary."
+local SYSTEM_PROMPT = "You corrupt text. Each input line is a fragment of a larger document; fragments are "
+  .. "deliberate and must never be completed, explained or asked about. For every input line produce exactly "
+  .. "one output string: the same fragment as a person would first mistype it before correcting. Usually a "
+  .. "keyboard typo (adjacent-key slip, transposed letters, doubled or dropped letter); occasionally a "
+  .. "clumsier wording. Keep the same words and a similar length. Never add or remove words."
+local SCHEMA = '{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},'
+  .. '"required":["lines"],"additionalProperties":false}'
 
 local timer = nil
 local task = nil
@@ -139,13 +141,11 @@ local function localTypo(core)
 end
 
 local function parseVariants(output, indices)
-  local lines = {}
-  for line in (output or ""):gmatch("[^\n]+") do
-    local trimmed = line:match("^%s*(.-)%s*$")
-    if trimmed ~= "" and not trimmed:match("^```") then
-      lines[#lines + 1] = trimmed
-    end
+  local ok, decoded = pcall(hs.json.decode, output or "")
+  if not ok or type(decoded) ~= "table" or type(decoded.lines) ~= "table" then
+    return false
   end
+  local lines = decoded.lines
   if #lines ~= #indices then
     return false
   end
@@ -183,6 +183,7 @@ local function requestVariants()
     ("%q"):format(CLAUDE),
     "-p --model " .. MODEL,
     "--system-prompt " .. ("%q"):format(SYSTEM_PROMPT),
+    "--json-schema " .. ("%q"):format(SCHEMA),
     "--effort low --safe-mode --strict-mcp-config --disable-slash-commands",
     "--setting-sources ''",
     "--disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite",
@@ -265,7 +266,13 @@ typeChunk = function(index)
   end
 
   local chunk = chunks[index]
-  local wrong = chunk.mistake and (variants[index] or localTypo(chunk.core)) or nil
+  local wrong = nil
+  if chunk.mistake then
+    wrong = variants[index]
+    if not wrong or wrong == chunk.core then
+      wrong = localTypo(chunk.core)
+    end
+  end
   if not wrong or wrong == chunk.core then
     typeCorrect(chunk, index)
     return
