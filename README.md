@@ -31,7 +31,7 @@ The clipboard is split into chunks of 2–4 words. Each chunk is a `core` (the
 words) and a `tail` (the trailing whitespace). Chunks never span a line break,
 so a correction never has to backspace over a newline.
 
-About 18% of chunks get a mistake. Those play out as:
+About 28% of chunks get a mistake. Those play out as:
 
 ```
 type the wrong version
@@ -89,12 +89,12 @@ All at the top of the file:
 
 | Constant | Default | Effect |
 | --- | --- | --- |
-| `MISTAKE_CHANCE` | `0.18` | Share of chunks that get a typo |
+| `MISTAKE_CHANCE` | `0.28` | Share of chunks that get a typo |
 | `WORDS_PER_CHUNK_MIN/MAX` | `2, 4` | Chunk size; lower means smaller corrections |
-| `MIN_CORE_LENGTH` | `12` | Chunks shorter than this are never mistyped |
+| `MIN_CORE_LENGTH` | `10` | Chunks shorter than this are never mistyped |
 | `BASE_DELAY` | `0.055` | Base per-character delay |
 | `REALIZE_PAUSE_MIN/MAX` | `0.25, 0.70` | Pause before noticing a mistake |
-| `MAX_LINES_PER_CALL` | `25` | Cap on variants requested per paste |
+| `MAX_LINES_PER_CALL` | `40` | Cap on variants requested per paste |
 
 ## Background
 

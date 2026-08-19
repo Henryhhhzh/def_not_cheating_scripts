@@ -9,16 +9,16 @@ local CLAUSE_PAUSE_MIN, CLAUSE_PAUSE_MAX = 0.08, 0.20
 local LINE_PAUSE_MIN, LINE_PAUSE_MAX = 0.20, 0.50
 local SPACE_FACTOR = 0.8
 
-local MISTAKE_CHANCE = 0.18
+local MISTAKE_CHANCE = 0.28
 local WORDS_PER_CHUNK_MIN, WORDS_PER_CHUNK_MAX = 2, 4
-local MIN_CORE_LENGTH = 12
+local MIN_CORE_LENGTH = 10
 local REALIZE_PAUSE_MIN, REALIZE_PAUSE_MAX = 0.25, 0.70
 local BACKSPACE_DELAY_MIN, BACKSPACE_DELAY_MAX = 0.02, 0.055
 local RESUME_PAUSE_MIN, RESUME_PAUSE_MAX = 0.08, 0.25
 
 local CLAUDE = os.getenv("HOME") .. "/.local/bin/claude"
 local MODEL = "claude-haiku-4-5-20251001"
-local MAX_LINES_PER_CALL = 25
+local MAX_LINES_PER_CALL = 40
 local SYSTEM_PROMPT = "You corrupt text. Each input line is a fragment of a larger document; fragments are "
   .. "deliberate and must never be completed, explained or asked about. For every input line produce exactly "
   .. "one output string: the same fragment as a person would first mistype it before correcting. Usually a "
