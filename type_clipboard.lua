@@ -16,9 +16,20 @@ local REALIZE_PAUSE_MIN, REALIZE_PAUSE_MAX = 0.25, 0.70
 local BACKSPACE_DELAY_MIN, BACKSPACE_DELAY_MAX = 0.02, 0.055
 local RESUME_PAUSE_MIN, RESUME_PAUSE_MAX = 0.08, 0.25
 
+local CLAUDE = os.getenv("HOME") .. "/.local/bin/claude"
+local MODEL = "claude-haiku-4-5-20251001"
+local MAX_LINES_PER_CALL = 25
+local SYSTEM_PROMPT = "Rewrite each input line as the version a person would type first and then correct. "
+  .. "Usually a keyboard typo: adjacent-key slip, transposed letters, a doubled or dropped letter. "
+  .. "Sometimes instead a rougher wording or weaker synonym of the same thing. "
+  .. "Keep it recognisable and a similar length. Never substitute unrelated words. "
+  .. "Output only the rewritten lines, one per input line, same count, no numbering or commentary."
+
 local timer = nil
+local task = nil
 local running = false
 local chunks = {}
+local variants = {}
 
 local function randRange(lo, hi)
   return lo + math.random() * (hi - lo)
@@ -125,9 +136,65 @@ local function localTypo(core)
   return result
 end
 
+local function parseVariants(output, indices)
+  local lines = {}
+  for line in (output or ""):gmatch("[^\n]+") do
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if trimmed ~= "" and not trimmed:match("^```") then
+      lines[#lines + 1] = trimmed
+    end
+  end
+  if #lines ~= #indices then
+    return false
+  end
+  for position, index in ipairs(indices) do
+    variants[index] = lines[position]
+  end
+  return true
+end
+
+local function requestVariants()
+  local indices, prompt = {}, {}
+  for index, chunk in ipairs(chunks) do
+    if chunk.mistake and #indices < MAX_LINES_PER_CALL then
+      indices[#indices + 1] = index
+      prompt[#prompt + 1] = chunk.core
+    end
+  end
+  if #indices == 0 then
+    return
+  end
+
+  local path = os.tmpname()
+  local file = io.open(path, "w")
+  file:write(table.concat(prompt, "\n"), "\n")
+  file:close()
+
+  local command = table.concat({
+    ("%q"):format(CLAUDE),
+    "-p --model " .. MODEL,
+    "--system-prompt " .. ("%q"):format(SYSTEM_PROMPT),
+    "< " .. ("%q"):format(path),
+  }, " ")
+
+  task = hs.task.new("/bin/zsh", function(code, stdout)
+    task = nil
+    os.remove(path)
+    if code ~= 0 or not parseVariants(stdout, indices) then
+      hs.alert.show("Typo AI unavailable — using local typos", 1)
+    end
+  end, { "-c", command })
+
+  task:start()
+end
+
 local function finish(message)
   running = false
   timer = nil
+  if task then
+    task:terminate()
+    task = nil
+  end
   hs.alert.show(message, 1)
 end
 
@@ -185,7 +252,7 @@ typeChunk = function(index)
   end
 
   local chunk = chunks[index]
-  local wrong = chunk.mistake and localTypo(chunk.core) or nil
+  local wrong = chunk.mistake and (variants[index] or localTypo(chunk.core)) or nil
   if not wrong or wrong == chunk.core then
     typeCorrect(chunk, index)
     return
@@ -216,7 +283,9 @@ function M.start()
   end
 
   chunks = buildChunks(text)
+  variants = {}
   running = true
+  requestVariants()
 
   hs.alert.show(("Typing %d chunks in %.1fs — focus the target field"):format(#chunks, START_DELAY), START_DELAY)
   timer = hs.timer.doAfter(START_DELAY, function()
