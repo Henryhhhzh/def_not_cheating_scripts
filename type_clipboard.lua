@@ -1,24 +1,43 @@
 local M = {}
 
-local START_DELAY = 1.5
-local BASE_DELAY = 0.055
-local JITTER_MIN = 0.6
-local JITTER_MAX = 1.6
-local SENTENCE_PAUSE_MIN, SENTENCE_PAUSE_MAX = 0.25, 0.60
-local CLAUSE_PAUSE_MIN, CLAUSE_PAUSE_MAX = 0.08, 0.20
-local LINE_PAUSE_MIN, LINE_PAUSE_MAX = 0.20, 0.50
-local SPACE_FACTOR = 0.8
+local CONFIG_PATH = os.getenv("HOME") .. "/.hammerspoon/type_clipboard_config.json"
 
-local MISTAKE_CHANCE = 0.28
-local WORDS_PER_CHUNK_MIN, WORDS_PER_CHUNK_MAX = 2, 4
-local MIN_CORE_LENGTH = 10
-local REALIZE_PAUSE_MIN, REALIZE_PAUSE_MAX = 0.25, 0.70
-local BACKSPACE_DELAY_MIN, BACKSPACE_DELAY_MAX = 0.02, 0.055
-local RESUME_PAUSE_MIN, RESUME_PAUSE_MAX = 0.08, 0.25
+local DEFAULTS = {
+  speed = {
+    baseDelay = 0.055,
+    jitterMin = 0.6,
+    jitterMax = 1.6,
+    spaceFactor = 0.8,
+  },
+  pauses = {
+    startDelay = 1.5,
+    sentenceMin = 0.25, sentenceMax = 0.60,
+    clauseMin = 0.08, clauseMax = 0.20,
+    lineMin = 0.20, lineMax = 0.50,
+    paragraphMin = 0.80, paragraphMax = 2.00,
+  },
+  mistakes = {
+    chance = 0.28,
+    chunkMin = 2, chunkMax = 4,
+    minLength = 10,
+    realizeMin = 0.25, realizeMax = 0.70,
+    backspaceMin = 0.02, backspaceMax = 0.055,
+    resumeMin = 0.08, resumeMax = 0.25,
+    kinds = {
+      transpose = true,
+      drop = true,
+      double = true,
+      adjacent = true,
+    },
+  },
+  ai = {
+    enabled = true,
+    model = "claude-haiku-4-5-20251001",
+    maxLinesPerCall = 40,
+  },
+}
 
 local CLAUDE = os.getenv("HOME") .. "/.local/bin/claude"
-local MODEL = "claude-haiku-4-5-20251001"
-local MAX_LINES_PER_CALL = 40
 local SYSTEM_PROMPT = "You corrupt text. Each input line is a fragment of a larger document; fragments are "
   .. "deliberate and must never be completed, explained or asked about. For every input line produce exactly "
   .. "one output string: the same fragment as a person would first mistype it before correcting. Usually a "
@@ -27,26 +46,70 @@ local SYSTEM_PROMPT = "You corrupt text. Each input line is a fragment of a larg
 local SCHEMA = '{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},'
   .. '"required":["lines"],"additionalProperties":false}'
 
+local cfg = DEFAULTS
 local timer = nil
 local task = nil
 local running = false
 local chunks = {}
 local variants = {}
 
+local function merge(defaults, override)
+  local out = {}
+  for key, value in pairs(defaults) do
+    local supplied = override and override[key]
+    if type(value) == "table" then
+      out[key] = merge(value, type(supplied) == "table" and supplied or nil)
+    elseif supplied ~= nil and type(supplied) == type(value) then
+      out[key] = supplied
+    else
+      out[key] = value
+    end
+  end
+  return out
+end
+
+local function loadConfig()
+  local file = io.open(CONFIG_PATH, "r")
+  if not file then
+    cfg = DEFAULTS
+    return
+  end
+  local body = file:read("*a")
+  file:close()
+
+  local ok, decoded = pcall(hs.json.decode, body)
+  if not ok or type(decoded) ~= "table" then
+    hs.alert.show("Bad config JSON — using defaults", 2)
+    cfg = DEFAULTS
+    return
+  end
+  cfg = merge(DEFAULTS, decoded)
+end
+
 local function randRange(lo, hi)
+  if hi < lo then
+    lo, hi = hi, lo
+  end
   return lo + math.random() * (hi - lo)
 end
 
-local function delayAfter(char)
-  local delay = BASE_DELAY * randRange(JITTER_MIN, JITTER_MAX)
+local function delayAfter(char, chars, index)
+  local speed, pauses = cfg.speed, cfg.pauses
+  local delay = speed.baseDelay * randRange(speed.jitterMin, speed.jitterMax)
+
   if char == "\n" then
-    return delay + randRange(LINE_PAUSE_MIN, LINE_PAUSE_MAX)
+    if chars[index + 1] == "\n" then
+      return delay
+    elseif chars[index - 1] == "\n" then
+      return delay + randRange(pauses.paragraphMin, pauses.paragraphMax)
+    end
+    return delay + randRange(pauses.lineMin, pauses.lineMax)
   elseif char:match("[%.%!%?]") then
-    return delay + randRange(SENTENCE_PAUSE_MIN, SENTENCE_PAUSE_MAX)
+    return delay + randRange(pauses.sentenceMin, pauses.sentenceMax)
   elseif char:match("[,;:]") then
-    return delay + randRange(CLAUSE_PAUSE_MIN, CLAUSE_PAUSE_MAX)
+    return delay + randRange(pauses.clauseMin, pauses.clauseMax)
   elseif char == " " then
-    return delay * SPACE_FACTOR
+    return delay * speed.spaceFactor
   end
   return delay
 end
@@ -70,10 +133,11 @@ local function buildChunks(text)
     end
   end
 
+  local mistakes = cfg.mistakes
   local out = {}
   local index = 1
   while index <= #words do
-    local take = math.random(WORDS_PER_CHUNK_MIN, WORDS_PER_CHUNK_MAX)
+    local take = math.random(mistakes.chunkMin, math.max(mistakes.chunkMin, mistakes.chunkMax))
     local last = math.min(index + take - 1, #words)
     local core, tail = "", ""
     local position = index
@@ -86,7 +150,7 @@ local function buildChunks(text)
       out[#out + 1] = {
         core = core,
         tail = tail,
-        mistake = #core >= MIN_CORE_LENGTH and math.random() < MISTAKE_CHANCE,
+        mistake = #core >= mistakes.minLength and math.random() < mistakes.chance,
       }
     end
     index = position
@@ -101,7 +165,20 @@ local ADJACENT = {
   v = "cfb", w = "qes", x = "zsc", y = "tuh", z = "asx",
 }
 
-local function localTypo(core)
+local function enabledKinds()
+  local kinds = {}
+  for name, on in pairs(cfg.mistakes.kinds) do
+    if on then
+      kinds[#kinds + 1] = name
+    end
+  end
+  table.sort(kinds)
+  return kinds
+end
+
+local ATTEMPTS = 8
+
+local function attemptTypo(core, kinds)
   local letters = splitCharacters(core)
   local positions = {}
   for index, char in ipairs(letters) do
@@ -114,17 +191,19 @@ local function localTypo(core)
   end
 
   local pick = positions[math.random(#positions)]
-  local mode = math.random(4)
+  local kind = kinds[math.random(#kinds)]
 
-  if mode == 1 and pick < #letters and letters[pick + 1]:match("%a") then
+  if kind == "transpose" then
+    if pick >= #letters or not letters[pick + 1]:match("%a") then
+      return nil
+    end
     letters[pick], letters[pick + 1] = letters[pick + 1], letters[pick]
-  elseif mode == 2 then
+  elseif kind == "drop" then
     table.remove(letters, pick)
-  elseif mode == 3 then
+  elseif kind == "double" then
     table.insert(letters, pick, letters[pick])
   else
-    local lower = letters[pick]:lower()
-    local neighbours = ADJACENT[lower]
+    local neighbours = ADJACENT[letters[pick]:lower()]
     if not neighbours then
       return nil
     end
@@ -138,6 +217,23 @@ local function localTypo(core)
     return nil
   end
   return result
+end
+
+-- A chosen kind can fail on a given position (transposing a word's last
+-- letter, or a key with no neighbour), so retry before giving up. Without
+-- this, narrowing the enabled kinds quietly drops most mistakes.
+local function localTypo(core)
+  local kinds = enabledKinds()
+  if #kinds == 0 then
+    return nil
+  end
+  for _ = 1, ATTEMPTS do
+    local result = attemptTypo(core, kinds)
+    if result then
+      return result
+    end
+  end
+  return nil
 end
 
 local function parseVariants(output, indices)
@@ -160,9 +256,13 @@ local function parseVariants(output, indices)
 end
 
 local function requestVariants()
+  if not cfg.ai.enabled then
+    return
+  end
+
   local indices, prompt = {}, {}
   for index, chunk in ipairs(chunks) do
-    if chunk.mistake and #indices < MAX_LINES_PER_CALL then
+    if chunk.mistake and #indices < cfg.ai.maxLinesPerCall then
       indices[#indices + 1] = index
       prompt[#prompt + 1] = chunk.core
     end
@@ -181,7 +281,7 @@ local function requestVariants()
   local command = table.concat({
     "MAX_THINKING_TOKENS=0",
     ("%q"):format(CLAUDE),
-    "-p --model " .. MODEL,
+    "-p --model " .. cfg.ai.model,
     "--system-prompt " .. ("%q"):format(SYSTEM_PROMPT),
     "--json-schema " .. ("%q"):format(SCHEMA),
     "--effort low --safe-mode --strict-mcp-config --disable-slash-commands",
@@ -230,7 +330,7 @@ local function typeCharacters(characters, index, done)
     hs.eventtap.keyStrokes(char)
   end
 
-  timer = hs.timer.doAfter(delayAfter(char), function()
+  timer = hs.timer.doAfter(delayAfter(char, characters, index), function()
     typeCharacters(characters, index + 1, done)
   end)
 end
@@ -245,7 +345,8 @@ local function backspace(count, done)
   end
 
   hs.eventtap.keyStroke({}, "delete", 0)
-  timer = hs.timer.doAfter(randRange(BACKSPACE_DELAY_MIN, BACKSPACE_DELAY_MAX), function()
+  local mistakes = cfg.mistakes
+  timer = hs.timer.doAfter(randRange(mistakes.backspaceMin, mistakes.backspaceMax), function()
     backspace(count - 1, done)
   end)
 end
@@ -278,11 +379,12 @@ typeChunk = function(index)
     return
   end
 
+  local mistakes = cfg.mistakes
   local wrongCharacters = splitCharacters(wrong)
   typeCharacters(wrongCharacters, 1, function()
-    timer = hs.timer.doAfter(randRange(REALIZE_PAUSE_MIN, REALIZE_PAUSE_MAX), function()
+    timer = hs.timer.doAfter(randRange(mistakes.realizeMin, mistakes.realizeMax), function()
       backspace(#wrongCharacters, function()
-        timer = hs.timer.doAfter(randRange(RESUME_PAUSE_MIN, RESUME_PAUSE_MAX), function()
+        timer = hs.timer.doAfter(randRange(mistakes.resumeMin, mistakes.resumeMax), function()
           typeCorrect(chunk, index)
         end)
       end)
@@ -302,13 +404,15 @@ function M.start()
     return
   end
 
+  loadConfig()
   chunks = buildChunks(text)
   variants = {}
   running = true
   requestVariants()
 
-  hs.alert.show(("Typing %d chunks in %.1fs — focus the target field"):format(#chunks, START_DELAY), START_DELAY)
-  timer = hs.timer.doAfter(START_DELAY, function()
+  local startDelay = cfg.pauses.startDelay
+  hs.alert.show(("Typing %d chunks in %.1fs — focus the target field"):format(#chunks, startDelay), startDelay)
+  timer = hs.timer.doAfter(startDelay, function()
     typeChunk(1)
   end)
 end
