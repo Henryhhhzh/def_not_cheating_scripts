@@ -31,7 +31,8 @@ The clipboard is split into chunks of 2–4 words. Each chunk is a `core` (the
 words) and a `tail` (the trailing whitespace). Chunks never span a line break,
 so a correction never has to backspace over a newline.
 
-About 28% of chunks get a mistake. Those play out as:
+About 28% of chunks get a mistake, and chunks never span a line break.
+Those play out as:
 
 ```
 type the wrong version
@@ -83,18 +84,49 @@ Three things worth knowing if you copy this:
 - Short or fragmentary input makes the model ask a clarifying question rather
   than do the task. The system prompt has to say that fragments are deliberate.
 
-## Tuning
+## Configuring it
 
-All at the top of the file:
+Open `cadence-console.html` in a browser. It has a live preview that runs the
+same typing engine, so you can watch a setting before committing to it. Copy
+the JSON it produces to:
 
-| Constant | Default | Effect |
+```
+~/.hammerspoon/type_clipboard_config.json
+```
+
+The file is read fresh on every paste, so there is no reload step. Delete it to
+go back to defaults.
+
+Every key is optional — anything absent uses the built-in default, and a value
+of the wrong type is ignored rather than breaking the run. This is a complete,
+valid config:
+
+```json
+{ "mistakes": { "chance": 0.5 } }
+```
+
+The full shape:
+
+| Key | Default | Effect |
 | --- | --- | --- |
-| `MISTAKE_CHANCE` | `0.28` | Share of chunks that get a typo |
-| `WORDS_PER_CHUNK_MIN/MAX` | `2, 4` | Chunk size; lower means smaller corrections |
-| `MIN_CORE_LENGTH` | `10` | Chunks shorter than this are never mistyped |
-| `BASE_DELAY` | `0.055` | Base per-character delay |
-| `REALIZE_PAUSE_MIN/MAX` | `0.25, 0.70` | Pause before noticing a mistake |
-| `MAX_LINES_PER_CALL` | `40` | Cap on variants requested per paste |
+| `speed.baseDelay` | `0.055` | Seconds between keystrokes, before jitter |
+| `speed.jitterMin/Max` | `0.6, 1.6` | Random multiplier applied per keystroke |
+| `speed.spaceFactor` | `0.8` | Spaces are typed quicker than letters |
+| `pauses.startDelay` | `1.5` | Time to focus the target field |
+| `pauses.clauseMin/Max` | `0.08, 0.20` | Pause after `,` `;` `:` |
+| `pauses.sentenceMin/Max` | `0.25, 0.60` | Pause after `.` `!` `?` |
+| `pauses.lineMin/Max` | `0.20, 0.50` | Pause after a line break |
+| `pauses.paragraphMin/Max` | `0.80, 2.00` | Pause after a blank line |
+| `mistakes.chance` | `0.28` | Share of eligible chunks typed wrong first |
+| `mistakes.chunkMin/Max` | `2, 4` | Words per chunk |
+| `mistakes.minLength` | `10` | Chunks shorter than this are never mistyped |
+| `mistakes.realizeMin/Max` | `0.25, 0.70` | Beat before noticing the mistake |
+| `mistakes.backspaceMin/Max` | `0.02, 0.055` | Per-character delete speed |
+| `mistakes.resumeMin/Max` | `0.08, 0.25` | Pause after deleting, before retyping |
+| `mistakes.kinds.*` | all `true` | `transpose`, `drop`, `double`, `adjacent` |
+| `ai.enabled` | `true` | Use Claude for variants |
+| `ai.model` | Haiku 4.5 | Model for variant generation |
+| `ai.maxLinesPerCall` | `40` | Cap on variants requested per paste |
 
 ## Background
 
