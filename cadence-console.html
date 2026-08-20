@@ -1,0 +1,1193 @@
+<title>Cadence Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --ground: #EAEEF3;
+  --surface: #FFFFFF;
+  --surface-sunk: #F3F6F9;
+  --ink: #10151C;
+  --ink-soft: #3C4753;
+  --muted: #66727F;
+  --line: #D2DAE3;
+  --line-strong: #B8C3CF;
+  --signal: #1257C9;
+  --signal-soft: #E3ECFB;
+  --erase: #B23A2E;
+  --erase-soft: #FBE7E4;
+  --shadow: 0 1px 2px rgba(16, 21, 28, .06), 0 8px 24px -12px rgba(16, 21, 28, .18);
+
+  --step-0: .8125rem;
+  --step-1: .9375rem;
+  --step-2: 1.0625rem;
+  --step-3: 1.375rem;
+  --step-4: clamp(1.75rem, 1.3rem + 1.6vw, 2.5rem);
+
+  --r-sm: 4px;
+  --r-md: 7px;
+  --r-lg: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0B0F14;
+    --surface: #141A22;
+    --surface-sunk: #0F151C;
+    --ink: #E7EDF4;
+    --ink-soft: #BCC7D4;
+    --muted: #8593A2;
+    --line: #24303D;
+    --line-strong: #35434F;
+    --signal: #6BA5FF;
+    --signal-soft: #16273F;
+    --erase: #FF8776;
+    --erase-soft: #33201D;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0B0F14;
+  --surface: #141A22;
+  --surface-sunk: #0F151C;
+  --ink: #E7EDF4;
+  --ink-soft: #BCC7D4;
+  --muted: #8593A2;
+  --line: #24303D;
+  --line-strong: #35434F;
+  --signal: #6BA5FF;
+  --signal-soft: #16273F;
+  --erase: #FF8776;
+  --erase-soft: #33201D;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--step-1);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.wrap {
+  max-width: 1340px;
+  margin: 0 auto;
+  padding: clamp(1.25rem, .8rem + 1.8vw, 2.5rem);
+}
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 2px solid var(--ink);
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: var(--step-4);
+  font-weight: 700;
+  letter-spacing: -.025em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+
+.masthead p {
+  margin: .5rem 0 0;
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: var(--step-1);
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: .5rem;
+  color: var(--signal);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-0);
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.preset {
+  padding: .45rem .7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-0);
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+
+.preset:hover { border-color: var(--signal); color: var(--signal); }
+.preset[aria-pressed="true"] { background: var(--signal); border-color: var(--signal); color: #fff; }
+:root[data-theme="dark"] .preset[aria-pressed="true"] { color: #0B0F14; }
+
+/* ---------- console grid ---------- */
+
+.console {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 26rem);
+  gap: 1.75rem;
+  align-items: start;
+  margin-top: 1.75rem;
+}
+
+@media (max-width: 1000px) {
+  .console { grid-template-columns: minmax(0, 1fr); }
+  .monitor { order: -1; }
+}
+
+.rails { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+
+/* ---------- control groups ---------- */
+
+.group {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.group > header {
+  display: flex;
+  align-items: baseline;
+  gap: .75rem;
+  padding: .85rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+
+.group h2 {
+  margin: 0;
+  font-size: var(--step-2);
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.group header p {
+  margin: 0;
+  flex: 1 1 14rem;
+  color: var(--muted);
+  font-size: var(--step-0);
+}
+
+.controls { display: flex; flex-direction: column; }
+
+.ctl {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .5rem 1rem;
+  padding: .7rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.controls > .ctl:first-child { border-top: none; }
+
+@media (max-width: 620px) {
+  .ctl { grid-template-columns: minmax(0, 1fr) auto; }
+  .ctl .sliders { grid-column: 1 / -1; }
+}
+
+.ctl > label, .ctl > .lbl {
+  font-size: var(--step-1);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.ctl .note {
+  display: block;
+  color: var(--muted);
+  font-size: var(--step-0);
+  font-weight: 400;
+}
+
+.sliders { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+
+.readout {
+  justify-self: end;
+  min-width: 6.5rem;
+  padding: .2rem .45rem;
+  border-radius: var(--r-sm);
+  background: var(--surface-sunk);
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-0);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- inputs ---------- */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1.1rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+input[type="range"]:focus-visible,
+select:focus-visible,
+button:focus-visible,
+textarea:focus-visible,
+.switch:focus-within {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+select, textarea {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-0);
+  padding: .35rem .5rem;
+}
+
+/* toggle */
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  cursor: pointer;
+  justify-self: end;
+}
+
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+.track {
+  width: 2.35rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background .14s;
+  flex: none;
+}
+
+.track::after {
+  content: "";
+  display: block;
+  width: .95rem;
+  height: .95rem;
+  margin: .15rem;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform .14s;
+}
+
+.switch input:checked + .track { background: var(--signal); }
+.switch input:checked + .track::after { transform: translateX(1.1rem); }
+
+/* ---------- monitor ---------- */
+
+.monitor {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+@media (max-width: 1000px) { .monitor { position: static; } }
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .7rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: var(--step-0);
+  font-weight: 600;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.screen {
+  min-height: 12.5rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 1rem;
+  background: var(--surface-sunk);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-0);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.screen .bad { color: var(--erase); background: var(--erase-soft); border-radius: 2px; }
+
+.caret {
+  display: inline-block;
+  width: .5ch;
+  margin-left: 1px;
+  background: var(--signal);
+  color: transparent;
+}
+
+.caret.blink { animation: blink 1.06s steps(1) infinite; }
+
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .caret.blink { animation: none; }
+  * { transition-duration: .01ms !important; }
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+}
+
+.stat { padding: .6rem 1rem; border-left: 1px solid var(--line); }
+.stat:first-child { border-left: none; }
+
+.stat dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: .6875rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.stat dd {
+  margin: .15rem 0 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-2);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat dd .u { font-size: var(--step-0); color: var(--muted); font-weight: 400; }
+
+.bar { display: flex; gap: .5rem; padding: .75rem 1rem; flex-wrap: wrap; }
+
+button.act {
+  flex: 1 1 auto;
+  padding: .5rem .8rem;
+  border: 1px solid var(--signal);
+  border-radius: var(--r-sm);
+  background: var(--signal);
+  color: #fff;
+  font-family: Archivo, sans-serif;
+  font-size: var(--step-1);
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter .12s;
+}
+
+:root[data-theme="dark"] button.act { color: #0B0F14; }
+
+button.act:hover { filter: brightness(1.08); }
+
+button.ghost {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink-soft);
+}
+
+button.ghost:hover { border-color: var(--signal); color: var(--signal); filter: none; }
+
+.code {
+  margin: 0;
+  padding: .9rem 1rem;
+  max-height: 17rem;
+  overflow: auto;
+  background: var(--surface-sunk);
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: .75rem;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.hint {
+  margin: 0;
+  padding: .7rem 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--step-0);
+}
+
+.hint code {
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink-soft);
+  background: var(--surface-sunk);
+  padding: .1em .35em;
+  border-radius: 3px;
+  font-size: .95em;
+}
+
+.sample {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  line-height: 1.6;
+}
+
+.kinds { display: grid; gap: 0; }
+
+.kind {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .75rem;
+  padding: .55rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.kind .ex {
+  display: block;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--step-0);
+}
+
+.kind .ex b { color: var(--erase); font-weight: 500; }
+
+footer.foot {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--step-0);
+}
+
+footer.foot code {
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink-soft);
+}
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div>
+      <span class="eyebrow">type_clipboard</span>
+      <h1>Cadence Console</h1>
+      <p>Tune how the typing feels — speed, hesitation, and the mistakes it makes — then copy the config into Hammerspoon.</p>
+    </div>
+    <div class="presets" role="group" aria-label="Presets">
+      <button class="preset" data-preset="default" aria-pressed="true">Default</button>
+      <button class="preset" data-preset="careful" aria-pressed="false">Careful</button>
+      <button class="preset" data-preset="fast" aria-pressed="false">Fast &amp; sloppy</button>
+      <button class="preset" data-preset="peck" aria-pressed="false">Hunt &amp; peck</button>
+      <button class="preset" data-preset="clean" aria-pressed="false">No mistakes</button>
+    </div>
+  </header>
+
+  <main class="console">
+    <div class="rails" id="rails"></div>
+
+    <aside class="monitor">
+      <section class="panel" aria-labelledby="prev-h">
+        <header>
+          <h2 id="prev-h">Live preview</h2>
+          <span class="readout mono" id="wpm-badge">—</span>
+        </header>
+        <div class="screen" id="screen" aria-live="off"></div>
+        <dl class="stats">
+          <div class="stat"><dt>Elapsed</dt><dd id="s-time">0.0<span class="u">s</span></dd></div>
+          <div class="stat"><dt>Mistakes</dt><dd id="s-mistakes">0</dd></div>
+          <div class="stat"><dt>Chunks</dt><dd id="s-chunks">0</dd></div>
+        </dl>
+        <div class="bar">
+          <button class="act" id="play">Play preview</button>
+          <button class="act ghost" id="reset">Reset all</button>
+        </div>
+        <label class="hint" for="sample" style="border-top:1px solid var(--line);display:block">Preview text</label>
+        <textarea class="sample mono" id="sample" spellcheck="false"></textarea>
+        <p class="hint">The preview uses the built-in typo generator. When the script runs for real it also pulls variants from Claude, which reword as well as mistype.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="cfg-h">
+        <header>
+          <h2 id="cfg-h">type_clipboard_config.json</h2>
+          <span class="readout mono" id="size">—</span>
+        </header>
+        <pre class="code" id="out"></pre>
+        <div class="bar">
+          <button class="act" id="copy">Copy config</button>
+        </div>
+        <p class="hint">Save as <code>~/.hammerspoon/type_clipboard_config.json</code>. It is read fresh on every paste, so there is no need to reload Hammerspoon. Delete the file to go back to defaults.</p>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    Every value here maps to a key the script reads. Anything you leave alone is
+    simply absent from the file and falls back to the built-in default, so a
+    partial config is perfectly valid — <code>{"mistakes":{"chance":0.5}}</code>
+    is a complete, working config file.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+const DEFAULTS = {
+  speed:    { baseDelay: 0.055, jitterMin: 0.6, jitterMax: 1.6, spaceFactor: 0.8 },
+  pauses:   { startDelay: 1.5, sentenceMin: 0.25, sentenceMax: 0.6, clauseMin: 0.08,
+              clauseMax: 0.2, lineMin: 0.2, lineMax: 0.5, paragraphMin: 0.8, paragraphMax: 2.0 },
+  mistakes: { chance: 0.28, chunkMin: 2, chunkMax: 4, minLength: 10,
+              realizeMin: 0.25, realizeMax: 0.7, backspaceMin: 0.02, backspaceMax: 0.055,
+              resumeMin: 0.08, resumeMax: 0.25,
+              kinds: { transpose: true, drop: true, double: true, adjacent: true } },
+  ai:       { enabled: true, model: "claude-haiku-4-5-20251001", maxLinesPerCall: 40 }
+};
+
+const PRESETS = {
+  default: {},
+  careful: {
+    speed: { baseDelay: 0.075, jitterMin: 0.75, jitterMax: 1.3 },
+    pauses: { sentenceMin: 0.4, sentenceMax: 0.9, paragraphMin: 1.2, paragraphMax: 2.6 },
+    mistakes: { chance: 0.1, minLength: 14, realizeMin: 0.15, realizeMax: 0.4 }
+  },
+  fast: {
+    speed: { baseDelay: 0.032, jitterMin: 0.45, jitterMax: 1.8 },
+    pauses: { sentenceMin: 0.12, sentenceMax: 0.3, clauseMin: 0.04, clauseMax: 0.1,
+              paragraphMin: 0.4, paragraphMax: 1.0 },
+    mistakes: { chance: 0.42, minLength: 8, realizeMin: 0.3, realizeMax: 0.85,
+                backspaceMin: 0.012, backspaceMax: 0.03 }
+  },
+  peck: {
+    speed: { baseDelay: 0.19, jitterMin: 0.5, jitterMax: 2.2, spaceFactor: 1.1 },
+    pauses: { sentenceMin: 0.6, sentenceMax: 1.5, lineMin: 0.5, lineMax: 1.2,
+              paragraphMin: 1.5, paragraphMax: 3.5 },
+    mistakes: { chance: 0.34, minLength: 8, realizeMin: 0.5, realizeMax: 1.4,
+                backspaceMin: 0.08, backspaceMax: 0.2, resumeMin: 0.2, resumeMax: 0.6,
+                kinds: { transpose: false, drop: false, double: true, adjacent: true } }
+  },
+  clean: {
+    mistakes: { chance: 0 },
+    ai: { enabled: false }
+  }
+};
+
+const SAMPLE = "Hi there,\n\nThanks for getting back to me about the timeline. I had a look at the documents you sent over and most of it makes sense.\n\nThere are a couple of things I wanted to check before we move forward.\n\nThanks,\nHenry";
+
+const SPEC = [
+  { name: "Speed", blurb: "How fast keys land, and how much that varies stroke to stroke.", items: [
+    { kind: "range", p: "speed.baseDelay", label: "Base delay", note: "Time between keystrokes before jitter.",
+      min: 0.015, max: 0.2, step: 0.001, fmt: v => v.toFixed(3) + " s" },
+    { kind: "pair", p: ["speed.jitterMin", "speed.jitterMax"], label: "Jitter range",
+      note: "Each keystroke multiplies the base delay by a random value in this range.",
+      min: 0.1, max: 3, step: 0.05, fmt: v => "×" + v.toFixed(2) },
+    { kind: "range", p: "speed.spaceFactor", label: "Space factor", note: "Spaces are usually quicker than letters.",
+      min: 0.2, max: 1.6, step: 0.05, fmt: v => "×" + v.toFixed(2) }
+  ]},
+  { name: "Pauses", blurb: "Where the typing hesitates. Longer breaks read as thinking.", items: [
+    { kind: "range", p: "pauses.startDelay", label: "Start delay", note: "Time to focus the target field before typing begins.",
+      min: 0, max: 6, step: 0.1, fmt: v => v.toFixed(1) + " s" },
+    { kind: "pair", p: ["pauses.clauseMin", "pauses.clauseMax"], label: "After , ; :",
+      min: 0, max: 1.5, step: 0.02, fmt: v => v.toFixed(2) + " s" },
+    { kind: "pair", p: ["pauses.sentenceMin", "pauses.sentenceMax"], label: "After . ! ?",
+      min: 0, max: 3, step: 0.05, fmt: v => v.toFixed(2) + " s" },
+    { kind: "pair", p: ["pauses.lineMin", "pauses.lineMax"], label: "After a line break",
+      min: 0, max: 3, step: 0.05, fmt: v => v.toFixed(2) + " s" },
+    { kind: "pair", p: ["pauses.paragraphMin", "pauses.paragraphMax"], label: "Between paragraphs",
+      note: "Applied after a blank line, instead of the line-break pause.",
+      min: 0, max: 8, step: 0.1, fmt: v => v.toFixed(1) + " s" }
+  ]},
+  { name: "Mistakes", blurb: "How often it mistypes, and how it behaves once it notices.", items: [
+    { kind: "range", p: "mistakes.chance", label: "Mistake chance", note: "Share of eligible chunks that get typed wrong first.",
+      min: 0, max: 0.8, step: 0.01, fmt: v => Math.round(v * 100) + "%" },
+    { kind: "pair", p: ["mistakes.chunkMin", "mistakes.chunkMax"], label: "Words per chunk",
+      note: "A mistake spans a whole chunk, so smaller chunks mean smaller corrections.",
+      min: 1, max: 8, step: 1, fmt: v => v.toFixed(0) },
+    { kind: "range", p: "mistakes.minLength", label: "Minimum length", note: "Chunks shorter than this are never mistyped.",
+      min: 3, max: 30, step: 1, fmt: v => v.toFixed(0) + " ch" },
+    { kind: "pair", p: ["mistakes.realizeMin", "mistakes.realizeMax"], label: "Notice delay",
+      note: "The beat between finishing the wrong text and starting to delete it.",
+      min: 0, max: 2.5, step: 0.05, fmt: v => v.toFixed(2) + " s" },
+    { kind: "pair", p: ["mistakes.backspaceMin", "mistakes.backspaceMax"], label: "Backspace speed",
+      min: 0.005, max: 0.25, step: 0.005, fmt: v => v.toFixed(3) + " s" },
+    { kind: "pair", p: ["mistakes.resumeMin", "mistakes.resumeMax"], label: "Resume delay",
+      note: "The pause after deleting, before retyping it correctly.",
+      min: 0, max: 1.5, step: 0.02, fmt: v => v.toFixed(2) + " s" }
+  ]},
+  { name: "Mistake kinds", blurb: "Which slips the built-in generator is allowed to make.", kinds: [
+    { p: "mistakes.kinds.transpose", label: "Transposition", ex: ["the", "teh"] },
+    { p: "mistakes.kinds.drop", label: "Dropped letter", ex: ["quick", "quik"] },
+    { p: "mistakes.kinds.double", label: "Doubled letter", ex: ["hello", "helllo"] },
+    { p: "mistakes.kinds.adjacent", label: "Adjacent key", ex: ["brown", "beown"] }
+  ]},
+  { name: "Claude", blurb: "Optional. Adds rewordings the local generator cannot produce.", items: [
+    { kind: "toggle", p: "ai.enabled", label: "Use Claude for variants", note: "Falls back to the local generator whenever it is off, slow, or unavailable." },
+    { kind: "select", p: "ai.model", label: "Model", options: [
+      ["claude-haiku-4-5-20251001", "Haiku 4.5 — fastest, cheapest"],
+      ["claude-sonnet-5", "Sonnet 5 — better variants"] ] },
+    { kind: "range", p: "ai.maxLinesPerCall", label: "Variants per paste", note: "Caps how many mistakes are sent in the single batched request.",
+      min: 5, max: 100, step: 5, fmt: v => v.toFixed(0) }
+  ]}
+];
+
+/* ---------- state ---------- */
+
+const clone = o => JSON.parse(JSON.stringify(o));
+let cfg = clone(DEFAULTS);
+
+const get = p => p.split(".").reduce((o, k) => o[k], cfg);
+const set = (p, v) => {
+  const keys = p.split(".");
+  const last = keys.pop();
+  keys.reduce((o, k) => o[k], cfg)[last] = v;
+};
+
+function deepMerge(base, over) {
+  const out = clone(base);
+  for (const k of Object.keys(over || {})) {
+    out[k] = (over[k] && typeof over[k] === "object" && !Array.isArray(over[k]))
+      ? deepMerge(out[k], over[k]) : over[k];
+  }
+  return out;
+}
+
+/* ---------- build controls ---------- */
+
+const rails = document.getElementById("rails");
+const bound = [];
+
+function readout(text) {
+  const s = document.createElement("span");
+  s.className = "readout";
+  s.textContent = text;
+  return s;
+}
+
+function labelCell(label, note) {
+  const d = document.createElement("div");
+  d.className = "lbl";
+  d.textContent = label;
+  if (note) {
+    const n = document.createElement("span");
+    n.className = "note";
+    n.textContent = note;
+    d.appendChild(n);
+  }
+  return d;
+}
+
+function buildRange(item) {
+  const row = document.createElement("div");
+  row.className = "ctl";
+  const lab = document.createElement("label");
+  lab.textContent = item.label;
+  if (item.note) {
+    const n = document.createElement("span");
+    n.className = "note";
+    n.textContent = item.note;
+    lab.appendChild(n);
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "sliders";
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = item.min; input.max = item.max; input.step = item.step;
+  const id = "c_" + item.p.replace(/\./g, "_");
+  input.id = id;
+  lab.htmlFor = id;
+  wrap.appendChild(input);
+  const out = readout("");
+  row.append(lab, wrap, out);
+
+  const sync = () => {
+    input.value = get(item.p);
+    out.textContent = item.fmt(Number(input.value));
+  };
+  input.addEventListener("input", () => {
+    set(item.p, Number(input.value));
+    out.textContent = item.fmt(Number(input.value));
+    render();
+  });
+  bound.push(sync);
+  return row;
+}
+
+function buildPair(item) {
+  const [pMin, pMax] = item.p;
+  const row = document.createElement("div");
+  row.className = "ctl";
+  row.append(labelCell(item.label, item.note));
+
+  const wrap = document.createElement("div");
+  wrap.className = "sliders";
+  const lo = document.createElement("input");
+  const hi = document.createElement("input");
+  for (const el of [lo, hi]) {
+    el.type = "range";
+    el.min = item.min; el.max = item.max; el.step = item.step;
+    wrap.appendChild(el);
+  }
+  lo.setAttribute("aria-label", item.label + " minimum");
+  hi.setAttribute("aria-label", item.label + " maximum");
+  const out = readout("");
+  row.append(wrap, out);
+
+  const show = () => {
+    out.textContent = item.fmt(Number(lo.value)) + " – " + item.fmt(Number(hi.value));
+  };
+  const sync = () => { lo.value = get(pMin); hi.value = get(pMax); show(); };
+
+  lo.addEventListener("input", () => {
+    if (Number(lo.value) > Number(hi.value)) hi.value = lo.value;
+    set(pMin, Number(lo.value)); set(pMax, Number(hi.value));
+    show(); render();
+  });
+  hi.addEventListener("input", () => {
+    if (Number(hi.value) < Number(lo.value)) lo.value = hi.value;
+    set(pMin, Number(lo.value)); set(pMax, Number(hi.value));
+    show(); render();
+  });
+  bound.push(sync);
+  return row;
+}
+
+function buildToggle(item, cls) {
+  const row = document.createElement("div");
+  row.className = cls || "ctl";
+  row.append(labelCell(item.label, item.note));
+  const sw = document.createElement("label");
+  sw.className = "switch";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  const track = document.createElement("span");
+  track.className = "track";
+  sw.append(cb, track);
+  sw.setAttribute("aria-label", item.label);
+  row.append(sw);
+  const sync = () => { cb.checked = get(item.p); };
+  cb.addEventListener("change", () => { set(item.p, cb.checked); render(); });
+  bound.push(sync);
+  return row;
+}
+
+function buildKind(k) {
+  const row = document.createElement("div");
+  row.className = "kind";
+  const d = document.createElement("div");
+  d.className = "lbl";
+  d.textContent = k.label;
+  const ex = document.createElement("span");
+  ex.className = "ex";
+  ex.append(k.ex[0] + " → ");
+  const b = document.createElement("b");
+  b.textContent = k.ex[1];
+  ex.append(b);
+  d.appendChild(ex);
+  row.append(d);
+
+  const sw = document.createElement("label");
+  sw.className = "switch";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  const track = document.createElement("span");
+  track.className = "track";
+  sw.append(cb, track);
+  sw.setAttribute("aria-label", k.label);
+  row.append(sw);
+  const sync = () => { cb.checked = get(k.p); };
+  cb.addEventListener("change", () => { set(k.p, cb.checked); render(); });
+  bound.push(sync);
+  return row;
+}
+
+function buildSelect(item) {
+  const row = document.createElement("div");
+  row.className = "ctl";
+  const lab = document.createElement("label");
+  lab.textContent = item.label;
+  const id = "c_" + item.p.replace(/\./g, "_");
+  lab.htmlFor = id;
+  const wrap = document.createElement("div");
+  wrap.className = "sliders";
+  const sel = document.createElement("select");
+  sel.id = id;
+  for (const [v, t] of item.options) {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = t;
+    sel.appendChild(o);
+  }
+  wrap.appendChild(sel);
+  row.append(lab, wrap, document.createElement("span"));
+  const sync = () => { sel.value = get(item.p); };
+  sel.addEventListener("change", () => { set(item.p, sel.value); render(); });
+  bound.push(sync);
+  return row;
+}
+
+for (const group of SPEC) {
+  const sec = document.createElement("section");
+  sec.className = "group";
+  const head = document.createElement("header");
+  const h = document.createElement("h2");
+  h.textContent = group.name;
+  const p = document.createElement("p");
+  p.textContent = group.blurb;
+  head.append(h, p);
+  sec.append(head);
+
+  if (group.kinds) {
+    const box = document.createElement("div");
+    box.className = "kinds";
+    group.kinds.forEach(k => box.append(buildKind(k)));
+    sec.append(box);
+  } else {
+    const box = document.createElement("div");
+    box.className = "controls";
+    for (const item of group.items) {
+      if (item.kind === "range") box.append(buildRange(item));
+      else if (item.kind === "pair") box.append(buildPair(item));
+      else if (item.kind === "toggle") box.append(buildToggle(item));
+      else if (item.kind === "select") box.append(buildSelect(item));
+    }
+    sec.append(box);
+  }
+  rails.append(sec);
+}
+
+/* ---------- typing engine (mirrors the Lua) ---------- */
+
+const ADJACENT = {
+  a:"qsz", b:"vgn", c:"xdv", d:"sfce", e:"wrd", f:"dgrv", g:"fhtb", h:"gjyn",
+  i:"uok", j:"hkum", k:"jlim", l:"kop", m:"njk", n:"bhm", o:"ipl", p:"ol",
+  q:"wa", r:"etf", s:"adwx", t:"ryg", u:"yij", v:"cfb", w:"qes", x:"zsc",
+  y:"tuh", z:"asx"
+};
+
+function rand(lo, hi) {
+  if (hi < lo) { const t = lo; lo = hi; hi = t; }
+  return lo + Math.random() * (hi - lo);
+}
+const randInt = (lo, hi) => Math.floor(lo + Math.random() * (hi - lo + 1));
+
+function buildChunks(text) {
+  const words = [];
+  const re = /([^\s]*)(\s*)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m[0] === "") { re.lastIndex++; if (re.lastIndex > text.length) break; continue; }
+    words.push({ word: m[1], space: m[2] });
+  }
+
+  const mk = cfg.mistakes;
+  const out = [];
+  let i = 0;
+  while (i < words.length) {
+    const take = randInt(mk.chunkMin, Math.max(mk.chunkMin, mk.chunkMax));
+    const last = Math.min(i + take - 1, words.length - 1);
+    let core = "", tail = "", pos = i;
+    do {
+      core += tail + words[pos].word;
+      tail = words[pos].space;
+      pos++;
+    } while (pos <= last && !tail.includes("\n"));
+    if (core !== "" || tail !== "") {
+      out.push({
+        core, tail,
+        mistake: core.length >= mk.minLength && Math.random() < mk.chance
+      });
+    }
+    i = pos;
+  }
+  return out;
+}
+
+function enabledKinds() {
+  return Object.keys(cfg.mistakes.kinds).filter(k => cfg.mistakes.kinds[k]).sort();
+}
+
+function attemptTypo(core, kinds) {
+  const letters = [...core];
+  const positions = [];
+  letters.forEach((c, i) => { if (/[a-z]/i.test(c)) positions.push(i); });
+  if (positions.length < 2) return null;
+
+  const pick = positions[Math.floor(Math.random() * positions.length)];
+  const kind = kinds[Math.floor(Math.random() * kinds.length)];
+
+  if (kind === "transpose") {
+    if (pick >= letters.length - 1 || !/[a-z]/i.test(letters[pick + 1])) return null;
+    [letters[pick], letters[pick + 1]] = [letters[pick + 1], letters[pick]];
+  } else if (kind === "drop") {
+    letters.splice(pick, 1);
+  } else if (kind === "double") {
+    letters.splice(pick, 0, letters[pick]);
+  } else {
+    const n = ADJACENT[letters[pick].toLowerCase()];
+    if (!n) return null;
+    const swap = n[Math.floor(Math.random() * n.length)];
+    letters[pick] = letters[pick] === letters[pick].toUpperCase() ? swap.toUpperCase() : swap;
+  }
+  const result = letters.join("");
+  return result === core ? null : result;
+}
+
+function localTypo(core) {
+  const kinds = enabledKinds();
+  if (!kinds.length) return null;
+  for (let i = 0; i < 8; i++) {
+    const r = attemptTypo(core, kinds);
+    if (r) return r;
+  }
+  return null;
+}
+
+function delayAfter(ch, chars, i) {
+  const { speed, pauses } = cfg;
+  const d = speed.baseDelay * rand(speed.jitterMin, speed.jitterMax);
+  if (ch === "\n") {
+    if (chars[i + 1] === "\n") return d;
+    if (chars[i - 1] === "\n") return d + rand(pauses.paragraphMin, pauses.paragraphMax);
+    return d + rand(pauses.lineMin, pauses.lineMax);
+  }
+  if (/[.!?]/.test(ch)) return d + rand(pauses.sentenceMin, pauses.sentenceMax);
+  if (/[,;:]/.test(ch)) return d + rand(pauses.clauseMin, pauses.clauseMax);
+  if (ch === " ") return d * speed.spaceFactor;
+  return d;
+}
+
+/* ---------- preview ---------- */
+
+const screen = document.getElementById("screen");
+const sampleBox = document.getElementById("sample");
+const playBtn = document.getElementById("play");
+const sTime = document.getElementById("s-time");
+const sMistakes = document.getElementById("s-mistakes");
+const sChunks = document.getElementById("s-chunks");
+const wpmBadge = document.getElementById("wpm-badge");
+
+sampleBox.value = SAMPLE;
+
+let run = 0;
+let playing = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function paint(good, bad) {
+  screen.textContent = "";
+  screen.append(document.createTextNode(good));
+  if (bad) {
+    const s = document.createElement("span");
+    s.className = "bad";
+    s.textContent = bad;
+    screen.append(s);
+  }
+  const c = document.createElement("span");
+  c.className = "caret" + (playing ? "" : " blink");
+  c.textContent = " ";
+  screen.append(c);
+  screen.scrollTop = screen.scrollHeight;
+}
+
+async function play() {
+  const me = ++run;
+  playing = true;
+  playBtn.textContent = "Stop";
+  const text = sampleBox.value;
+  const chunks = buildChunks(text);
+  sChunks.textContent = chunks.length;
+
+  let good = "", bad = "", mistakes = 0;
+  const t0 = performance.now();
+  const tick = setInterval(() => {
+    sTime.innerHTML = ((performance.now() - t0) / 1000).toFixed(1) + '<span class="u">s</span>';
+  }, 100);
+
+  const stop = () => run !== me;
+
+  await sleep(cfg.pauses.startDelay * 1000);
+
+  outer:
+  for (const chunk of chunks) {
+    if (stop()) break;
+    let wrong = chunk.mistake ? localTypo(chunk.core) : null;
+
+    if (wrong && wrong !== chunk.core) {
+      mistakes++;
+      sMistakes.textContent = mistakes;
+      const wc = [...wrong];
+      for (let i = 0; i < wc.length; i++) {
+        if (stop()) break outer;
+        bad += wc[i];
+        paint(good, bad);
+        await sleep(delayAfter(wc[i], wc, i) * 1000);
+      }
+      await sleep(rand(cfg.mistakes.realizeMin, cfg.mistakes.realizeMax) * 1000);
+      while (bad.length) {
+        if (stop()) break outer;
+        bad = bad.slice(0, -1);
+        paint(good, bad);
+        await sleep(rand(cfg.mistakes.backspaceMin, cfg.mistakes.backspaceMax) * 1000);
+      }
+      await sleep(rand(cfg.mistakes.resumeMin, cfg.mistakes.resumeMax) * 1000);
+    }
+
+    const cc = [...(chunk.core + chunk.tail)];
+    for (let i = 0; i < cc.length; i++) {
+      if (stop()) break outer;
+      good += cc[i];
+      paint(good, bad);
+      await sleep(delayAfter(cc[i], cc, i) * 1000);
+    }
+  }
+
+  clearInterval(tick);
+  if (!stop()) {
+    playing = false;
+    playBtn.textContent = "Play preview";
+    paint(good, "");
+  }
+}
+
+playBtn.addEventListener("click", () => {
+  if (playing) {
+    run++;
+    playing = false;
+    playBtn.textContent = "Play preview";
+    return;
+  }
+  play();
+});
+
+/* ---------- output ---------- */
+
+const out = document.getElementById("out");
+const sizeBadge = document.getElementById("size");
+
+function estimate() {
+  const text = sampleBox.value;
+  const chars = [...text];
+  const perChar = cfg.speed.baseDelay * (cfg.speed.jitterMin + cfg.speed.jitterMax) / 2;
+  const wpm = perChar > 0 ? Math.round(60 / (perChar * 5)) : 0;
+  wpmBadge.textContent = wpm + " wpm";
+}
+
+function render() {
+  bound.forEach(fn => fn());
+  const json = JSON.stringify(cfg, null, 2);
+  out.textContent = json;
+  sizeBadge.textContent = new Blob([json]).size + " B";
+  estimate();
+  const active = Object.keys(PRESETS).find(k =>
+    JSON.stringify(deepMerge(DEFAULTS, PRESETS[k])) === JSON.stringify(cfg));
+  document.querySelectorAll(".preset").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.preset === active)));
+}
+
+document.querySelectorAll(".preset").forEach(btn => {
+  btn.addEventListener("click", () => {
+    cfg = deepMerge(DEFAULTS, PRESETS[btn.dataset.preset]);
+    render();
+  });
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  cfg = clone(DEFAULTS);
+  sampleBox.value = SAMPLE;
+  render();
+});
+
+document.getElementById("copy").addEventListener("click", async e => {
+  const text = JSON.stringify(cfg, null, 2);
+  const btn = e.currentTarget;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "Copied";
+  } catch {
+    const r = document.createRange();
+    r.selectNodeContents(out);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    btn.textContent = "Selected — press ⌘C";
+  }
+  setTimeout(() => { btn.textContent = "Copy config"; }, 1800);
+});
+
+sampleBox.addEventListener("input", estimate);
+
+render();
+paint(SAMPLE.slice(0, 0), "");
+</script>
