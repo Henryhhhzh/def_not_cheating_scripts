@@ -31,8 +31,12 @@ The clipboard is split into chunks of 2–4 words. Each chunk is a `core` (the
 words) and a `tail` (the trailing whitespace). Chunks never span a line break,
 so a correction never has to backspace over a newline.
 
-About 28% of chunks get a mistake, and chunks never span a line break.
-Those play out as:
+Two things keep the pace from reading as mechanical. Speed carries a clamped
+random walk across chunks, so the typing has fast and slow stretches rather
+than a constant rate that jitter averages back to. And a think pause can stop
+it before any chunk, anywhere in the text, independent of punctuation.
+
+About 28% of chunks get a mistake. Those play out as:
 
 ```
 type the wrong version
@@ -112,11 +116,14 @@ The full shape:
 | `speed.baseDelay` | `0.055` | Seconds between keystrokes, before jitter |
 | `speed.jitterMin/Max` | `0.6, 1.6` | Random multiplier applied per keystroke |
 | `speed.spaceFactor` | `0.8` | Spaces are typed quicker than letters |
+| `speed.driftAmount` | `0.25` | How far the pace wanders; `0` is a metronome |
 | `pauses.startDelay` | `1.5` | Time to focus the target field |
 | `pauses.clauseMin/Max` | `0.08, 0.20` | Pause after `,` `;` `:` |
 | `pauses.sentenceMin/Max` | `0.25, 0.60` | Pause after `.` `!` `?` |
 | `pauses.lineMin/Max` | `0.20, 0.50` | Pause after a line break |
 | `pauses.paragraphMin/Max` | `0.80, 2.00` | Pause after a blank line |
+| `pauses.thinkChance` | `0.08` | Odds of stopping before a chunk, anywhere |
+| `pauses.thinkMin/Max` | `0.60, 2.50` | Length of that pause |
 | `mistakes.chance` | `0.28` | Share of eligible chunks typed wrong first |
 | `mistakes.chunkMin/Max` | `2, 4` | Words per chunk |
 | `mistakes.minLength` | `10` | Chunks shorter than this are never mistyped |
