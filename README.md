@@ -58,6 +58,15 @@ backspace it, type the correct text
 → × trail                  <- walk back to the end
 ```
 
+Whole sentences get the same treatment. At most one per paragraph is sent to
+Claude for a plainer first-draft version, typed in place of the real sentence
+and repaired the same way:
+
+```
+final : this raised quite a conundrum for one such as himself
+draft : this was a real problem for him
+```
+
 `trail` is the number of characters typed since the mistake. Because every
 one of them sits *after* the cursor, the repair never changes that count, so
 the caret lands back exactly where it left. Only one repair is outstanding at
@@ -153,6 +162,9 @@ The full shape:
 | `mistakes.noticeMin/Max` | `0.40, 1.60` | Pause before walking the caret back |
 | `mistakes.arrowMin/Max` | `0.012, 0.035` | Per arrow keypress, both directions |
 | `mistakes.returnMin/Max` | `0.15, 0.50` | Pause after fixing, before returning |
+| `drafts.enabled` | `true` | Draft whole sentences before rewriting them |
+| `drafts.chance` | `0.70` | Odds a paragraph gets one drafted sentence |
+| `drafts.minLength` | `40` | Sentences shorter than this are left alone |
 | `ai.enabled` | `true` | Use Claude for variants |
 | `ai.model` | Haiku 4.5 | Model for variant generation |
 | `ai.maxLinesPerCall` | `40` | Cap on variants requested per paste |
