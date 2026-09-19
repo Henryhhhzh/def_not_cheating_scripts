@@ -36,7 +36,7 @@ random walk across chunks, so the typing has fast and slow stretches rather
 than a constant rate that jitter averages back to. And a think pause can stop
 it before any chunk, anywhere in the text, independent of punctuation.
 
-About 28% of chunks get a mistake. Those play out as:
+About 28% of chunks get a mistake. Most are caught at once:
 
 ```
 type the wrong version
@@ -45,6 +45,23 @@ backspace it, 0.02–0.055s per character
   pause 0.08–0.25s
 type the correct text
 ```
+
+The rest are caught late, the way a typo usually is in practice — a
+sentence or two after it happened:
+
+```
+type the wrong version, carry on for 1-4 chunks
+  pause 0.4–1.6s           <- spotting it
+← × trail                  <- walk the caret back
+backspace it, type the correct text
+  pause 0.15–0.5s
+→ × trail                  <- walk back to the end
+```
+
+`trail` is the number of characters typed since the mistake. Because every
+one of them sits *after* the cursor, the repair never changes that count, so
+the caret lands back exactly where it left. Only one repair is outstanding at
+a time, which keeps the count unambiguous.
 
 Every chunk that needs a variant goes into **one** background request, fired as
 typing starts. Anything that has not arrived by the time it is needed uses a
@@ -131,6 +148,11 @@ The full shape:
 | `mistakes.backspaceMin/Max` | `0.02, 0.055` | Per-character delete speed |
 | `mistakes.resumeMin/Max` | `0.08, 0.25` | Pause after deleting, before retyping |
 | `mistakes.kinds.*` | all `true` | `transpose`, `drop`, `double`, `adjacent` |
+| `mistakes.deferredShare` | `0.35` | Share of mistakes repaired late instead of at once |
+| `mistakes.deferMin/Max` | `1, 4` | Chunks to keep typing before going back |
+| `mistakes.noticeMin/Max` | `0.40, 1.60` | Pause before walking the caret back |
+| `mistakes.arrowMin/Max` | `0.012, 0.035` | Per arrow keypress, both directions |
+| `mistakes.returnMin/Max` | `0.15, 0.50` | Pause after fixing, before returning |
 | `ai.enabled` | `true` | Use Claude for variants |
 | `ai.model` | Haiku 4.5 | Model for variant generation |
 | `ai.maxLinesPerCall` | `40` | Cap on variants requested per paste |
