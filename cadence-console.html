@@ -615,6 +615,9 @@ const DEFAULTS = {
   mistakes: { chance: 0.28, chunkMin: 2, chunkMax: 4, minLength: 10,
               realizeMin: 0.25, realizeMax: 0.7, backspaceMin: 0.02, backspaceMax: 0.055,
               resumeMin: 0.08, resumeMax: 0.25,
+              deferredShare: 0.35, deferMin: 1, deferMax: 4,
+              arrowMin: 0.012, arrowMax: 0.035,
+              noticeMin: 0.4, noticeMax: 1.6, returnMin: 0.15, returnMax: 0.5,
               kinds: { transpose: true, drop: true, double: true, adjacent: true } },
   ai:       { enabled: true, model: "claude-haiku-4-5-20251001", maxLinesPerCall: 40 }
 };
@@ -697,6 +700,21 @@ const SPEC = [
     { kind: "pair", p: ["mistakes.resumeMin", "mistakes.resumeMax"], label: "Resume delay",
       note: "The pause after deleting, before retyping it correctly.",
       min: 0, max: 1.5, step: 0.02, fmt: v => v.toFixed(2) + " s" }
+  ]},
+  { name: "Late repairs", blurb: "Mistakes caught a few chunks later and fixed in place with the arrow keys, instead of straight away.", items: [
+    { kind: "range", p: "mistakes.deferredShare", label: "Caught late",
+      note: "Share of mistakes left standing and repaired afterwards. Only one repair is ever outstanding.",
+      min: 0, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + "%" },
+    { kind: "pair", p: ["mistakes.deferMin", "mistakes.deferMax"], label: "Chunks before noticing",
+      note: "How far it keeps typing before going back. Further back means a longer arrow-key journey.",
+      min: 1, max: 14, step: 1, fmt: v => v.toFixed(0) },
+    { kind: "pair", p: ["mistakes.noticeMin", "mistakes.noticeMax"], label: "Pause before going back",
+      min: 0, max: 4, step: 0.05, fmt: v => v.toFixed(2) + " s" },
+    { kind: "pair", p: ["mistakes.arrowMin", "mistakes.arrowMax"], label: "Arrow key speed",
+      note: "Per keypress, both directions. Near key-repeat speed reads as holding the key down.",
+      min: 0.005, max: 0.12, step: 0.005, fmt: v => v.toFixed(3) + " s" },
+    { kind: "pair", p: ["mistakes.returnMin", "mistakes.returnMax"], label: "Pause before returning",
+      min: 0, max: 2, step: 0.05, fmt: v => v.toFixed(2) + " s" }
   ]},
   { name: "Mistake kinds", blurb: "Which slips the built-in generator is allowed to make.", kinds: [
     { p: "mistakes.kinds.transpose", label: "Transposition", ex: ["the", "teh"] },
@@ -1064,20 +1082,39 @@ let run = 0;
 let playing = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function paint(good, bad) {
+// The field is a buffer plus a cursor, because a late repair moves the caret
+// back into text already typed rather than deleting from the end.
+function paint(buf, cur, mark) {
   screen.textContent = "";
-  screen.append(document.createTextNode(good));
-  if (bad) {
-    const s = document.createElement("span");
-    s.className = "bad";
-    s.textContent = bad;
-    screen.append(s);
+  const put = (chars, cls) => {
+    const text = chars.join("");
+    if (!text) return;
+    if (!cls) { screen.append(document.createTextNode(text)); return; }
+    const el = document.createElement("span");
+    el.className = cls;
+    el.textContent = text;
+    screen.append(el);
+  };
+
+  const caret = document.createElement("span");
+  caret.className = "caret" + (playing ? "" : " blink");
+  caret.textContent = " ";
+
+  const cuts = [0, cur, buf.length];
+  if (mark) cuts.push(mark.start, mark.start + mark.length);
+  const points = [...new Set(cuts)].sort((a, b) => a - b);
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const [a, b] = [points[i], points[i + 1]];
+    if (a === cur) screen.append(caret);
+    const bad = mark && a >= mark.start && b <= mark.start + mark.length;
+    put(buf.slice(a, b), bad ? "bad" : null);
   }
-  const c = document.createElement("span");
-  c.className = "caret" + (playing ? "" : " blink");
-  c.textContent = " ";
-  screen.append(c);
-  screen.scrollTop = screen.scrollHeight;
+  if (cur === buf.length) screen.append(caret);
+
+  const box = screen.getBoundingClientRect();
+  const c = caret.getBoundingClientRect();
+  if (c.top < box.top || c.bottom > box.bottom) caret.scrollIntoView({ block: "nearest" });
 }
 
 async function play() {
@@ -1088,7 +1125,7 @@ async function play() {
   const chunks = buildChunks(text);
   sChunks.textContent = chunks.length;
 
-  let good = "", bad = "", mistakes = 0;
+  let buf = [], cur = 0, mistakes = 0, pending = null;
   drift = 1;
   const t0 = performance.now();
   const tick = setInterval(() => {
@@ -1096,10 +1133,62 @@ async function play() {
   }, 100);
 
   const stop = () => run !== me;
+  const show = () => paint(buf, cur, pending);
+
+  async function typeStr(str) {
+    const cs = [...str];
+    for (let i = 0; i < cs.length; i++) {
+      if (stop()) return false;
+      buf.splice(cur, 0, cs[i]);
+      cur++;
+      show();
+      await sleep(delayAfter(cs[i], cs, i) * 1000);
+    }
+    return true;
+  }
+
+  async function backsp(n) {
+    for (let i = 0; i < n; i++) {
+      if (stop()) return false;
+      if (cur > 0) { buf.splice(cur - 1, 1); cur--; }
+      show();
+      await sleep(rand(cfg.mistakes.backspaceMin, cfg.mistakes.backspaceMax) * 1000);
+    }
+    return true;
+  }
+
+  async function arrow(dir, n) {
+    for (let i = 0; i < n; i++) {
+      if (stop()) return false;
+      cur = Math.max(0, Math.min(buf.length, cur + dir));
+      show();
+      await sleep(rand(cfg.mistakes.arrowMin, cfg.mistakes.arrowMax) * 1000);
+    }
+    return true;
+  }
+
+  async function revise() {
+    const r = pending;
+    await sleep(rand(cfg.mistakes.noticeMin, cfg.mistakes.noticeMax) * 1000);
+    if (stop()) return false;
+    if (!await arrow(-1, r.trail)) return false;
+    pending = null;
+    if (!await backsp([...r.wrong].length)) return false;
+    if (!await typeStr(r.correct)) return false;
+    await sleep(rand(cfg.mistakes.returnMin, cfg.mistakes.returnMax) * 1000);
+    if (stop()) return false;
+    return await arrow(1, r.trail);
+  }
+
+  async function advance(index, typed) {
+    if (!pending) return true;
+    pending.trail += [...typed].length;
+    if (index >= pending.due) return await revise();
+    return true;
+  }
 
   await sleep(cfg.pauses.startDelay * 1000);
 
-  outer:
   for (const [ci, chunk] of chunks.entries()) {
     if (stop()) break;
     nudgeDrift();
@@ -1109,42 +1198,49 @@ async function play() {
       if (stop()) break;
     }
 
-    let wrong = chunk.mistake ? localTypo(chunk.core) : null;
+    const wrong = chunk.mistake ? localTypo(chunk.core) : null;
+    const mk = cfg.mistakes;
 
-    if (wrong && wrong !== chunk.core) {
-      mistakes++;
-      sMistakes.textContent = mistakes;
-      const wc = [...wrong];
-      for (let i = 0; i < wc.length; i++) {
-        if (stop()) break outer;
-        bad += wc[i];
-        paint(good, bad);
-        await sleep(delayAfter(wc[i], wc, i) * 1000);
-      }
-      await sleep(rand(cfg.mistakes.realizeMin, cfg.mistakes.realizeMax) * 1000);
-      while (bad.length) {
-        if (stop()) break outer;
-        bad = bad.slice(0, -1);
-        paint(good, bad);
-        await sleep(rand(cfg.mistakes.backspaceMin, cfg.mistakes.backspaceMax) * 1000);
-      }
-      await sleep(rand(cfg.mistakes.resumeMin, cfg.mistakes.resumeMax) * 1000);
+    if (!wrong || wrong === chunk.core) {
+      if (!await typeStr(chunk.core + chunk.tail)) break;
+      if (!await advance(ci, chunk.core + chunk.tail)) break;
+      continue;
     }
 
-    const cc = [...(chunk.core + chunk.tail)];
-    for (let i = 0; i < cc.length; i++) {
-      if (stop()) break outer;
-      good += cc[i];
-      paint(good, bad);
-      await sleep(delayAfter(cc[i], cc, i) * 1000);
+    mistakes++;
+    sMistakes.textContent = mistakes;
+
+    if (!pending && Math.random() < mk.deferredShare) {
+      const start = cur;
+      if (!await typeStr(wrong)) break;
+      pending = {
+        wrong, correct: chunk.core, trail: 0, start,
+        length: [...wrong].length,
+        due: ci + Math.floor(mk.deferMin + Math.random() * (Math.max(mk.deferMin, mk.deferMax) - mk.deferMin + 1))
+      };
+      if (!await typeStr(chunk.tail)) break;
+      if (!await advance(ci, chunk.tail)) break;
+      continue;
     }
+
+    if (!await typeStr(wrong)) break;
+    await sleep(rand(mk.realizeMin, mk.realizeMax) * 1000);
+    if (stop()) break;
+    if (!await backsp([...wrong].length)) break;
+    await sleep(rand(mk.resumeMin, mk.resumeMax) * 1000);
+    if (stop()) break;
+    if (!await typeStr(chunk.core + chunk.tail)) break;
+    if (!await advance(ci, chunk.core + chunk.tail)) break;
   }
+
+  if (!stop() && pending) await revise();
 
   clearInterval(tick);
   if (!stop()) {
     playing = false;
     playBtn.textContent = "Play preview";
-    paint(good, "");
+    pending = null;
+    show();
   }
 }
 
@@ -1216,5 +1312,5 @@ document.getElementById("copy").addEventListener("click", async e => {
 sampleBox.addEventListener("input", estimate);
 
 render();
-paint(SAMPLE.slice(0, 0), "");
+paint([], 0, null);
 </script>
