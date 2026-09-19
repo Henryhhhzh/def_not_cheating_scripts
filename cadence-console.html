@@ -608,9 +608,10 @@ footer.foot code {
 "use strict";
 
 const DEFAULTS = {
-  speed:    { baseDelay: 0.055, jitterMin: 0.6, jitterMax: 1.6, spaceFactor: 0.8 },
+  speed:    { baseDelay: 0.055, jitterMin: 0.6, jitterMax: 1.6, spaceFactor: 0.8, driftAmount: 0.25 },
   pauses:   { startDelay: 1.5, sentenceMin: 0.25, sentenceMax: 0.6, clauseMin: 0.08,
-              clauseMax: 0.2, lineMin: 0.2, lineMax: 0.5, paragraphMin: 0.8, paragraphMax: 2.0 },
+              clauseMax: 0.2, lineMin: 0.2, lineMax: 0.5, paragraphMin: 0.8, paragraphMax: 2.0,
+              thinkChance: 0.08, thinkMin: 0.6, thinkMax: 2.5 },
   mistakes: { chance: 0.28, chunkMin: 2, chunkMax: 4, minLength: 10,
               realizeMin: 0.25, realizeMax: 0.7, backspaceMin: 0.02, backspaceMax: 0.055,
               resumeMin: 0.08, resumeMax: 0.25,
@@ -621,21 +622,22 @@ const DEFAULTS = {
 const PRESETS = {
   default: {},
   careful: {
-    speed: { baseDelay: 0.075, jitterMin: 0.75, jitterMax: 1.3 },
-    pauses: { sentenceMin: 0.4, sentenceMax: 0.9, paragraphMin: 1.2, paragraphMax: 2.6 },
+    speed: { baseDelay: 0.075, jitterMin: 0.75, jitterMax: 1.3, driftAmount: 0.15 },
+    pauses: { sentenceMin: 0.4, sentenceMax: 0.9, paragraphMin: 1.2, paragraphMax: 2.6,
+              thinkChance: 0.12, thinkMin: 0.8, thinkMax: 3.0 },
     mistakes: { chance: 0.1, minLength: 14, realizeMin: 0.15, realizeMax: 0.4 }
   },
   fast: {
-    speed: { baseDelay: 0.032, jitterMin: 0.45, jitterMax: 1.8 },
+    speed: { baseDelay: 0.032, jitterMin: 0.45, jitterMax: 1.8, driftAmount: 0.35 },
     pauses: { sentenceMin: 0.12, sentenceMax: 0.3, clauseMin: 0.04, clauseMax: 0.1,
-              paragraphMin: 0.4, paragraphMax: 1.0 },
+              paragraphMin: 0.4, paragraphMax: 1.0, thinkChance: 0.04, thinkMax: 1.2 },
     mistakes: { chance: 0.42, minLength: 8, realizeMin: 0.3, realizeMax: 0.85,
                 backspaceMin: 0.012, backspaceMax: 0.03 }
   },
   peck: {
-    speed: { baseDelay: 0.19, jitterMin: 0.5, jitterMax: 2.2, spaceFactor: 1.1 },
+    speed: { baseDelay: 0.19, jitterMin: 0.5, jitterMax: 2.2, spaceFactor: 1.1, driftAmount: 0.4 },
     pauses: { sentenceMin: 0.6, sentenceMax: 1.5, lineMin: 0.5, lineMax: 1.2,
-              paragraphMin: 1.5, paragraphMax: 3.5 },
+              paragraphMin: 1.5, paragraphMax: 3.5, thinkChance: 0.18, thinkMax: 4.0 },
     mistakes: { chance: 0.34, minLength: 8, realizeMin: 0.5, realizeMax: 1.4,
                 backspaceMin: 0.08, backspaceMax: 0.2, resumeMin: 0.2, resumeMax: 0.6,
                 kinds: { transpose: false, drop: false, double: true, adjacent: true } }
@@ -656,7 +658,10 @@ const SPEC = [
       note: "Each keystroke multiplies the base delay by a random value in this range.",
       min: 0.1, max: 3, step: 0.05, fmt: v => "×" + v.toFixed(2) },
     { kind: "range", p: "speed.spaceFactor", label: "Space factor", note: "Spaces are usually quicker than letters.",
-      min: 0.2, max: 1.6, step: 0.05, fmt: v => "×" + v.toFixed(2) }
+      min: 0.2, max: 1.6, step: 0.05, fmt: v => "×" + v.toFixed(2) },
+    { kind: "range", p: "speed.driftAmount", label: "Speed drift",
+      note: "Typing wanders between fast and slow stretches instead of holding one pace. Zero is a metronome.",
+      min: 0, max: 0.6, step: 0.01, fmt: v => "±" + Math.round(v * 100) + "%" }
   ]},
   { name: "Pauses", blurb: "Where the typing hesitates. Longer breaks read as thinking.", items: [
     { kind: "range", p: "pauses.startDelay", label: "Start delay", note: "Time to focus the target field before typing begins.",
@@ -669,6 +674,11 @@ const SPEC = [
       min: 0, max: 3, step: 0.05, fmt: v => v.toFixed(2) + " s" },
     { kind: "pair", p: ["pauses.paragraphMin", "pauses.paragraphMax"], label: "Between paragraphs",
       note: "Applied after a blank line, instead of the line-break pause.",
+      min: 0, max: 8, step: 0.1, fmt: v => v.toFixed(1) + " s" },
+    { kind: "range", p: "pauses.thinkChance", label: "Think pause chance",
+      note: "Odds of simply stopping before a chunk, anywhere in the text — not tied to punctuation.",
+      min: 0, max: 0.4, step: 0.01, fmt: v => Math.round(v * 100) + "%" },
+    { kind: "pair", p: ["pauses.thinkMin", "pauses.thinkMax"], label: "Think pause length",
       min: 0, max: 8, step: 0.1, fmt: v => v.toFixed(1) + " s" }
   ]},
   { name: "Mistakes", blurb: "How often it mistypes, and how it behaves once it notices.", items: [
@@ -1015,9 +1025,18 @@ function localTypo(core) {
   return null;
 }
 
+let drift = 1;
+
+function nudgeDrift() {
+  const amount = cfg.speed.driftAmount;
+  if (amount <= 0) { drift = 1; return; }
+  drift += rand(-amount / 3, amount / 3);
+  drift = Math.max(1 - amount, Math.min(1 + amount, drift));
+}
+
 function delayAfter(ch, chars, i) {
   const { speed, pauses } = cfg;
-  const d = speed.baseDelay * rand(speed.jitterMin, speed.jitterMax);
+  const d = speed.baseDelay * drift * rand(speed.jitterMin, speed.jitterMax);
   if (ch === "\n") {
     if (chars[i + 1] === "\n") return d;
     if (chars[i - 1] === "\n") return d + rand(pauses.paragraphMin, pauses.paragraphMax);
@@ -1070,6 +1089,7 @@ async function play() {
   sChunks.textContent = chunks.length;
 
   let good = "", bad = "", mistakes = 0;
+  drift = 1;
   const t0 = performance.now();
   const tick = setInterval(() => {
     sTime.innerHTML = ((performance.now() - t0) / 1000).toFixed(1) + '<span class="u">s</span>';
@@ -1080,8 +1100,15 @@ async function play() {
   await sleep(cfg.pauses.startDelay * 1000);
 
   outer:
-  for (const chunk of chunks) {
+  for (const [ci, chunk] of chunks.entries()) {
     if (stop()) break;
+    nudgeDrift();
+
+    if (ci > 0 && Math.random() < cfg.pauses.thinkChance) {
+      await sleep(rand(cfg.pauses.thinkMin, cfg.pauses.thinkMax) * 1000);
+      if (stop()) break;
+    }
+
     let wrong = chunk.mistake ? localTypo(chunk.core) : null;
 
     if (wrong && wrong !== chunk.core) {
