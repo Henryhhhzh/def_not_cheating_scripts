@@ -4,8 +4,9 @@ A Hammerspoon script that types your clipboard out keystroke by keystroke with
 human cadence — variable delays, longer pauses after sentences and line breaks,
 and occasional typos that get noticed, backspaced and corrected.
 
-Typo variants come from a headless `claude -p` call. If that fails, is slow, or
-you are offline, it falls back to a local generator and keeps going.
+Typos come from a built-in generator. Sentence drafts come from a small model
+running locally through Ollama, so nothing leaves your machine and nothing is
+metered. If the model is unavailable the sentence just types normally.
 
 ## Install
 
@@ -22,8 +23,16 @@ hs.hotkey.bind({ "cmd", "alt", "ctrl" }, ".", typeClipboard.stop)
 Copy some text, focus a field, press <kbd>⌘⌥⌃V</kbd>. You get 1.5s to focus the
 target before it starts. <kbd>⌘⌥⌃.</kbd> stops it.
 
-The AI layer needs the `claude` CLI installed and logged in. Without it the
-script still works, using local typos only.
+Sentence drafting needs Ollama and a small model:
+
+```bash
+brew install ollama
+brew services start ollama
+ollama pull qwen2.5:0.5b
+```
+
+That is a 397MB download and about 400MB of RAM while it runs. Without it the
+script still works — you get typos, just no sentence drafting.
 
 ## How it works
 
@@ -79,40 +88,34 @@ local typo instead, so the typing never stalls waiting on the network.
 The final text always equals the clipboard exactly. Deletions are counted from
 the variant that was actually typed, so nothing can survive a correction.
 
-## Keeping the token cost down
+## Why a small model
 
-A plain `claude -p` call costs about **34,600 input tokens**, because it loads
-Claude Code's system prompt, every tool schema, `CLAUDE.md`, skills and MCP
-config. For a task this small that is almost all waste:
+The task is to write *worse*, which is the one thing a 0.5B model does without
+being asked. Measured on this machine:
 
-|                | before | after |
-| -------------- | -----: | ----: |
-| input tokens   | 34,600 | 3,500 |
-| output tokens  |  1,176 |   123 |
-| latency        |   9.7s |  3.5s |
+| | Claude Haiku | qwen2.5:0.5b |
+| --- | --- | --- |
+| tokens per paste | ~3,900 in / ~174 out | none |
+| time | ~3.5s | ~0.2s |
+| network | required | none |
 
-The flags that do it:
+It only follows the task if you show it rather than tell it. With an
+instruction-only prompt, two of four sentences came back unchanged. With three
+worked examples in the system prompt, all five rewrote cleanly:
 
 ```
-MAX_THINKING_TOKENS=0 claude -p --model claude-haiku-4-5-20251001 \
-  --system-prompt "<task>" \
-  --json-schema '{"type":"object","properties":{"lines":{...}},"required":["lines"]}' \
-  --effort low --safe-mode --strict-mcp-config --disable-slash-commands \
-  --setting-sources '' \
-  --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite \
-  --no-session-persistence < prompt.txt
+final : this raised quite a conundrum for one such as himself
+draft : this caused a lot of confusion for someone like him
 ```
 
-Three things worth knowing if you copy this:
+Typos deliberately do **not** go through the model. Head to head, the 0.5B
+dropped whole words and produced implausible slips like `pnsed`, while the
+built-in generator gives clean single-key errors instantly. Keyboard slips are
+mechanical, and a language model is the wrong tool for them.
 
-- `--bare` looks like the right flag but requires `ANTHROPIC_API_KEY` and never
-  reads OAuth, so it breaks on a subscription login. `--safe-mode` gets you the
-  same stripping without that.
-- `--json-schema` earns its extra output tokens. Without it the model prepends
-  chatter like *"I'll process these fragments..."*, which breaks any parsing
-  that depends on line counts.
-- Short or fragmentary input makes the model ask a clarifying question rather
-  than do the task. The system prompt has to say that fragments are deliberate.
+A bad draft cannot corrupt anything: the draft is always replaced by your real
+text, so the only thing a weak model costs you is a slightly odd sentence
+briefly on screen.
 
 ## Configuring it
 
@@ -165,9 +168,10 @@ The full shape:
 | `drafts.enabled` | `true` | Draft whole sentences before rewriting them |
 | `drafts.chance` | `0.70` | Odds a paragraph gets one drafted sentence |
 | `drafts.minLength` | `40` | Sentences shorter than this are left alone |
-| `ai.enabled` | `true` | Use Claude for variants |
-| `ai.model` | Haiku 4.5 | Model for variant generation |
-| `ai.maxLinesPerCall` | `40` | Cap on variants requested per paste |
+| `ai.enabled` | `true` | Use the local model for sentence drafts |
+| `ai.url` | localhost:11434 | Ollama generate endpoint |
+| `ai.model` | `qwen2.5:0.5b` | Local model name |
+| `ai.temperature` | `0.9` | Higher wanders further from the original |
 
 ## Background
 
