@@ -8,6 +8,7 @@ local DEFAULTS = {
     jitterMin = 0.6,
     jitterMax = 1.6,
     spaceFactor = 0.8,
+    driftAmount = 0.25,
   },
   pauses = {
     startDelay = 1.5,
@@ -15,6 +16,8 @@ local DEFAULTS = {
     clauseMin = 0.08, clauseMax = 0.20,
     lineMin = 0.20, lineMax = 0.50,
     paragraphMin = 0.80, paragraphMax = 2.00,
+    thinkChance = 0.08,
+    thinkMin = 0.60, thinkMax = 2.50,
   },
   mistakes = {
     chance = 0.28,
@@ -47,6 +50,7 @@ local SCHEMA = '{"type":"object","properties":{"lines":{"type":"array","items":{
   .. '"required":["lines"],"additionalProperties":false}'
 
 local cfg = DEFAULTS
+local drift = 1
 local timer = nil
 local task = nil
 local running = false
@@ -95,7 +99,7 @@ end
 
 local function delayAfter(char, chars, index)
   local speed, pauses = cfg.speed, cfg.pauses
-  local delay = speed.baseDelay * randRange(speed.jitterMin, speed.jitterMax)
+  local delay = speed.baseDelay * drift * randRange(speed.jitterMin, speed.jitterMax)
 
   if char == "\n" then
     if chars[index + 1] == "\n" then
@@ -314,6 +318,19 @@ end
 
 local typeChunk
 
+-- Real typing is not stationary: it comes in fast and slow stretches. An
+-- independent jitter per keystroke averages back to a metronome, so carry a
+-- slow random walk across chunks instead.
+local function nudgeDrift()
+  local amount = cfg.speed.driftAmount
+  if amount <= 0 then
+    drift = 1
+    return
+  end
+  drift = drift + randRange(-amount / 3, amount / 3)
+  drift = math.max(1 - amount, math.min(1 + amount, drift))
+end
+
 local function typeCharacters(characters, index, done)
   if not running then
     return
@@ -357,15 +374,7 @@ local function typeCorrect(chunk, index)
   end)
 end
 
-typeChunk = function(index)
-  if not running then
-    return
-  end
-  if index > #chunks then
-    finish("Typing done")
-    return
-  end
-
+local function runChunk(index)
   local chunk = chunks[index]
   local wrong = nil
   if chunk.mistake then
@@ -392,6 +401,30 @@ typeChunk = function(index)
   end)
 end
 
+typeChunk = function(index)
+  if not running then
+    return
+  end
+  if index > #chunks then
+    finish("Typing done")
+    return
+  end
+
+  nudgeDrift()
+
+  local pauses = cfg.pauses
+  if index > 1 and math.random() < pauses.thinkChance then
+    timer = hs.timer.doAfter(randRange(pauses.thinkMin, pauses.thinkMax), function()
+      if running then
+        runChunk(index)
+      end
+    end)
+    return
+  end
+
+  runChunk(index)
+end
+
 function M.start()
   if running then
     hs.alert.show("Already typing — ⌘⌥⌃. to stop")
@@ -407,6 +440,7 @@ function M.start()
   loadConfig()
   chunks = buildChunks(text)
   variants = {}
+  drift = 1
   running = true
   requestVariants()
 
