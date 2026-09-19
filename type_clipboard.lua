@@ -38,6 +38,11 @@ local DEFAULTS = {
       adjacent = true,
     },
   },
+  drafts = {
+    enabled = true,
+    chance = 0.70,
+    minLength = 40,
+  },
   ai = {
     enabled = true,
     model = "claude-haiku-4-5-20251001",
@@ -46,17 +51,23 @@ local DEFAULTS = {
 }
 
 local CLAUDE = os.getenv("HOME") .. "/.local/bin/claude"
-local SYSTEM_PROMPT = "You corrupt text. Each input line is a fragment of a larger document; fragments are "
-  .. "deliberate and must never be completed, explained or asked about. For every input line produce exactly "
-  .. "one output string: the same fragment as a person would first mistype it before correcting. Usually a "
-  .. "keyboard typo (adjacent-key slip, transposed letters, doubled or dropped letter); occasionally a "
-  .. "clumsier wording. Keep the same words and a similar length. Never add or remove words."
-local SCHEMA = '{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},'
-  .. '"required":["lines"],"additionalProperties":false}'
+local SYSTEM_PROMPT = "You rough up finished writing. The input has two sections. Every line in both is "
+  .. "taken from a real document; lines are deliberate and must never be completed, explained or asked about.\n"
+  .. "TYPOS: for each line return the same fragment as a person would first mistype it — a keyboard slip, "
+  .. "transposed letters, a doubled or dropped letter. Keep the same words and a similar length.\n"
+  .. "DRAFTS: for each line return a plainer, rougher way the writer might have put that same idea in a first "
+  .. "draft, before going back and sharpening it. Keep the meaning, voice and tense. Prefer ordinary words over "
+  .. "polished ones. It may be shorter or longer, but must be a single line with no line breaks.\n"
+  .. "Return one output per input line in each section, in order."
+local SCHEMA = '{"type":"object","properties":'
+  .. '{"typos":{"type":"array","items":{"type":"string"}},'
+  .. '"drafts":{"type":"array","items":{"type":"string"}}},'
+  .. '"required":["typos","drafts"],"additionalProperties":false}'
 
 local cfg = DEFAULTS
 local drift = 1
 local pending = nil
+local draftPlan = {}
 local timer = nil
 local task = nil
 local running = false
@@ -155,7 +166,7 @@ local function buildChunks(text)
       core = core .. tail .. words[position].word
       tail = words[position].space
       position = position + 1
-    until position > last or tail:find("\n")
+    until position > last or tail:find("\n") or core:match("[%.%!%?][\"')%]]*$")
     if core ~= "" or tail ~= "" then
       out[#out + 1] = {
         core = core,
@@ -246,44 +257,106 @@ local function localTypo(core)
   return nil
 end
 
-local function parseVariants(output, indices)
+-- A sentence is drafted as a whole, so chunk boundaries have to line up with
+-- it; buildChunks ends a chunk at sentence-final punctuation for that reason.
+local function planDrafts()
+  draftPlan = {}
+  if not cfg.drafts.enabled then
+    return {}
+  end
+
+  local groups, first = {}, 1
+  for index, chunk in ipairs(chunks) do
+    if chunk.core:match("[%.%!%?][\"')%]]*$") or chunk.tail:find("\n%s*\n") or index == #chunks then
+      groups[#groups + 1] = { first = first, last = index }
+      first = index + 1
+    end
+  end
+
+  local byParagraph, paragraph = {}, 1
+  for _, group in ipairs(groups) do
+    local real = ""
+    for index = group.first, group.last - 1 do
+      real = real .. chunks[index].core .. chunks[index].tail
+    end
+    real = real .. chunks[group.last].core
+    group.real = real
+    group.tail = chunks[group.last].tail
+
+    if not real:find("\n") and #real >= cfg.drafts.minLength then
+      byParagraph[paragraph] = byParagraph[paragraph] or {}
+      table.insert(byParagraph[paragraph], group)
+    end
+    if group.tail:find("\n%s*\n") then
+      paragraph = paragraph + 1
+    end
+  end
+
+  local picked = {}
+  for _, candidates in pairs(byParagraph) do
+    if math.random() < cfg.drafts.chance then
+      local group = candidates[math.random(#candidates)]
+      draftPlan[group.first] = group
+      picked[#picked + 1] = group
+    end
+  end
+  return picked
+end
+
+local function parseVariants(output, typoIndices, draftGroups)
   local ok, decoded = pcall(hs.json.decode, output or "")
-  if not ok or type(decoded) ~= "table" or type(decoded.lines) ~= "table" then
+  if not ok or type(decoded) ~= "table" then
     return false
   end
-  local lines = decoded.lines
-  if #lines ~= #indices then
+  local typos, drafts = decoded.typos, decoded.drafts
+  if type(typos) ~= "table" or type(drafts) ~= "table" then
     return false
   end
-  for position, index in ipairs(indices) do
-    local line = lines[position]
+  if #typos ~= #typoIndices or #drafts ~= #draftGroups then
+    return false
+  end
+
+  for position, index in ipairs(typoIndices) do
+    local line = typos[position]
     local core = chunks[index].core
     if not line:find("\n") and math.abs(#line - #core) <= #core * 0.4 + 3 then
       variants[index] = line
     end
   end
+  for position, group in ipairs(draftGroups) do
+    local line = drafts[position]
+    if line ~= "" and not line:find("\n") and line ~= group.real then
+      group.text = line
+    end
+  end
   return true
 end
 
-local function requestVariants()
+local function requestVariants(draftGroups)
   if not cfg.ai.enabled then
     return
   end
 
-  local indices, prompt = {}, {}
+  local indices, lines = {}, { "TYPOS" }
   for index, chunk in ipairs(chunks) do
     if chunk.mistake and #indices < cfg.ai.maxLinesPerCall then
       indices[#indices + 1] = index
-      prompt[#prompt + 1] = chunk.core
+      lines[#lines + 1] = chunk.core
     end
   end
-  if #indices == 0 then
+
+  lines[#lines + 1] = "DRAFTS"
+  for _, group in ipairs(draftGroups) do
+    lines[#lines + 1] = group.real
+  end
+
+  if #indices == 0 and #draftGroups == 0 then
     return
   end
 
   local path = os.tmpname()
   local file = io.open(path, "w")
-  file:write(table.concat(prompt, "\n"), "\n")
+  file:write(table.concat(lines, "\n"), "\n")
   file:close()
 
   -- Strip Claude Code's system prompt, tools, CLAUDE.md, skills and MCP config:
@@ -304,7 +377,7 @@ local function requestVariants()
   task = hs.task.new("/bin/zsh", function(code, stdout)
     task = nil
     os.remove(path)
-    if code ~= 0 or not parseVariants(stdout, indices) then
+    if code ~= 0 or not parseVariants(stdout, indices, draftGroups) then
       hs.alert.show("Typo AI unavailable — using local typos", 1)
     end
   end, { "-c", command })
@@ -434,6 +507,23 @@ advance = function(index, typedText)
 end
 
 local function runChunk(index)
+  local group = draftPlan[index]
+  if group and group.text and not pending then
+    local mistakes = cfg.mistakes
+    typeCharacters(splitCharacters(group.text), 1, function()
+      pending = {
+        wrong = group.text,
+        correct = group.real,
+        trail = 0,
+        due = group.last + math.random(mistakes.deferMin, math.max(mistakes.deferMin, mistakes.deferMax)),
+      }
+      typeCharacters(splitCharacters(group.tail), 1, function()
+        advance(group.last, group.tail)
+      end)
+    end)
+    return
+  end
+
   local chunk = chunks[index]
   local wrong = nil
   if chunk.mistake then
@@ -525,7 +615,7 @@ function M.start()
   drift = 1
   pending = nil
   running = true
-  requestVariants()
+  requestVariants(planDrafts())
 
   local startDelay = cfg.pauses.startDelay
   hs.alert.show(("Typing %d chunks in %.1fs — focus the target field"):format(#chunks, startDelay), startDelay)
