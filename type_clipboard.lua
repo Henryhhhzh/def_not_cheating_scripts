@@ -26,6 +26,11 @@ local DEFAULTS = {
     realizeMin = 0.25, realizeMax = 0.70,
     backspaceMin = 0.02, backspaceMax = 0.055,
     resumeMin = 0.08, resumeMax = 0.25,
+    deferredShare = 0.35,
+    deferMin = 1, deferMax = 4,
+    arrowMin = 0.012, arrowMax = 0.035,
+    noticeMin = 0.40, noticeMax = 1.60,
+    returnMin = 0.15, returnMax = 0.50,
     kinds = {
       transpose = true,
       drop = true,
@@ -51,6 +56,7 @@ local SCHEMA = '{"type":"object","properties":{"lines":{"type":"array","items":{
 
 local cfg = DEFAULTS
 local drift = 1
+local pending = nil
 local timer = nil
 local task = nil
 local running = false
@@ -317,6 +323,8 @@ local function finish(message)
 end
 
 local typeChunk
+local advance
+local doRevision
 
 -- Real typing is not stationary: it comes in fast and slow stretches. An
 -- independent jitter per keystroke averages back to a metronome, so carry a
@@ -368,10 +376,61 @@ local function backspace(count, done)
   end)
 end
 
-local function typeCorrect(chunk, index)
-  typeCharacters(splitCharacters(chunk.core .. chunk.tail), 1, function()
-    typeChunk(index + 1)
+local function pressKey(key, count, done)
+  if not running then
+    return
+  end
+  if count <= 0 then
+    done()
+    return
+  end
+
+  hs.eventtap.keyStroke({}, key, 0)
+  local mistakes = cfg.mistakes
+  timer = hs.timer.doAfter(randRange(mistakes.arrowMin, mistakes.arrowMax), function()
+    pressKey(key, count - 1, done)
   end)
+end
+
+local function typeCorrect(chunk, index)
+  local text = chunk.core .. chunk.tail
+  typeCharacters(splitCharacters(text), 1, function()
+    advance(index, text)
+  end)
+end
+
+-- A mistake noticed late is repaired in place: walk back over everything typed
+-- since, swap the text, then walk forward again. `trail` counts only characters
+-- that sit after the cursor, so the edit never changes it.
+doRevision = function(done)
+  local revision = pending
+  pending = nil
+
+  local mistakes = cfg.mistakes
+  timer = hs.timer.doAfter(randRange(mistakes.noticeMin, mistakes.noticeMax), function()
+    pressKey("left", revision.trail, function()
+      backspace(#splitCharacters(revision.wrong), function()
+        typeCharacters(splitCharacters(revision.correct), 1, function()
+          timer = hs.timer.doAfter(randRange(mistakes.returnMin, mistakes.returnMax), function()
+            pressKey("right", revision.trail, done)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
+
+advance = function(index, typedText)
+  if pending then
+    pending.trail = pending.trail + #splitCharacters(typedText)
+    if index >= pending.due then
+      doRevision(function()
+        typeChunk(index + 1)
+      end)
+      return
+    end
+  end
+  typeChunk(index + 1)
 end
 
 local function runChunk(index)
@@ -390,6 +449,23 @@ local function runChunk(index)
 
   local mistakes = cfg.mistakes
   local wrongCharacters = splitCharacters(wrong)
+
+  -- Only one repair is ever outstanding, so the trail count stays unambiguous.
+  if not pending and math.random() < mistakes.deferredShare then
+    typeCharacters(wrongCharacters, 1, function()
+      pending = {
+        wrong = wrong,
+        correct = chunk.core,
+        trail = 0,
+        due = index + math.random(mistakes.deferMin, math.max(mistakes.deferMin, mistakes.deferMax)),
+      }
+      typeCharacters(splitCharacters(chunk.tail), 1, function()
+        advance(index, chunk.tail)
+      end)
+    end)
+    return
+  end
+
   typeCharacters(wrongCharacters, 1, function()
     timer = hs.timer.doAfter(randRange(mistakes.realizeMin, mistakes.realizeMax), function()
       backspace(#wrongCharacters, function()
@@ -406,7 +482,13 @@ typeChunk = function(index)
     return
   end
   if index > #chunks then
-    finish("Typing done")
+    if pending then
+      doRevision(function()
+        finish("Typing done")
+      end)
+    else
+      finish("Typing done")
+    end
     return
   end
 
@@ -441,6 +523,7 @@ function M.start()
   chunks = buildChunks(text)
   variants = {}
   drift = 1
+  pending = nil
   running = true
   requestVariants()
 
