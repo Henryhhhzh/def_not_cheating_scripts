@@ -45,34 +45,30 @@ local DEFAULTS = {
   },
   ai = {
     enabled = true,
-    model = "claude-haiku-4-5-20251001",
-    maxLinesPerCall = 40,
+    url = "http://127.0.0.1:11434/api/generate",
+    model = "qwen2.5:0.5b",
+    temperature = 0.9,
   },
 }
 
-local CLAUDE = os.getenv("HOME") .. "/.local/bin/claude"
-local SYSTEM_PROMPT = "You rough up finished writing. The input has two sections. Every line in both is "
-  .. "taken from a real document; lines are deliberate and must never be completed, explained or asked about.\n"
-  .. "TYPOS: for each line return the same fragment as a person would first mistype it — a keyboard slip, "
-  .. "transposed letters, a doubled or dropped letter. Keep the same words and a similar length.\n"
-  .. "DRAFTS: for each line return a plainer, rougher way the writer might have put that same idea in a first "
-  .. "draft, before going back and sharpening it. Keep the meaning, voice and tense. Prefer ordinary words over "
-  .. "polished ones. It may be shorter or longer, but must be a single line with no line breaks.\n"
-  .. "Return one output per input line in each section, in order."
-local SCHEMA = '{"type":"object","properties":'
-  .. '{"typos":{"type":"array","items":{"type":"string"}},'
-  .. '"drafts":{"type":"array","items":{"type":"string"}}},'
-  .. '"required":["typos","drafts"],"additionalProperties":false}'
+-- A 0.5B model follows examples far better than instructions, so the prompt is
+-- carried almost entirely by the three shown rewrites.
+local DRAFT_SYSTEM = "You rewrite a polished sentence as the rough first-draft version, using plainer, "
+  .. "more ordinary words. Keep the meaning. Output only the rewritten sentence.\n\n"
+  .. "Example 1\nInput: the committee expressed considerable reservations regarding the proposal\n"
+  .. "Output: the committee had a lot of doubts about the plan\n\n"
+  .. "Example 2\nInput: it is imperative that we ascertain the root cause expeditiously\n"
+  .. "Output: we really need to find out what caused it fast\n\n"
+  .. "Example 3\nInput: she demonstrated remarkable proficiency in the discipline\n"
+  .. "Output: she was really good at it\n"
 
 local cfg = DEFAULTS
 local drift = 1
 local pending = nil
 local draftPlan = {}
 local timer = nil
-local task = nil
 local running = false
 local chunks = {}
-local variants = {}
 
 local function merge(defaults, override)
   local out = {}
@@ -303,95 +299,44 @@ local function planDrafts()
   return picked
 end
 
-local function parseVariants(output, typoIndices, draftGroups)
-  local ok, decoded = pcall(hs.json.decode, output or "")
-  if not ok or type(decoded) ~= "table" then
-    return false
-  end
-  local typos, drafts = decoded.typos, decoded.drafts
-  if type(typos) ~= "table" or type(drafts) ~= "table" then
-    return false
-  end
-  if #typos ~= #typoIndices or #drafts ~= #draftGroups then
-    return false
-  end
-
-  for position, index in ipairs(typoIndices) do
-    local line = typos[position]
-    local core = chunks[index].core
-    if not line:find("\n") and math.abs(#line - #core) <= #core * 0.4 + 3 then
-      variants[index] = line
-    end
-  end
-  for position, group in ipairs(draftGroups) do
-    local line = drafts[position]
-    if line ~= "" and not line:find("\n") and line ~= group.real then
-      group.text = line
-    end
-  end
-  return true
-end
-
-local function requestVariants(draftGroups)
-  if not cfg.ai.enabled then
+local function requestDrafts(groups)
+  if not cfg.ai.enabled or #groups == 0 then
     return
   end
 
-  local indices, lines = {}, { "TYPOS" }
-  for index, chunk in ipairs(chunks) do
-    if chunk.mistake and #indices < cfg.ai.maxLinesPerCall then
-      indices[#indices + 1] = index
-      lines[#lines + 1] = chunk.core
-    end
+  for _, group in ipairs(groups) do
+    local body = hs.json.encode({
+      model = cfg.ai.model,
+      system = DRAFT_SYSTEM,
+      prompt = "Input: " .. group.real .. "\nOutput:",
+      stream = false,
+      options = {
+        temperature = cfg.ai.temperature,
+        num_predict = 80,
+        stop = { "\n", "Input:", "Example" },
+      },
+    })
+
+    hs.http.asyncPost(cfg.ai.url, body, { ["Content-Type"] = "application/json" },
+      function(status, response)
+        if status ~= 200 then
+          return
+        end
+        local ok, decoded = pcall(hs.json.decode, response)
+        if not ok or type(decoded) ~= "table" or type(decoded.response) ~= "string" then
+          return
+        end
+        local text = decoded.response:match("^%s*(.-)%s*$")
+        if text ~= "" and not text:find("\n") and text ~= group.real then
+          group.text = text
+        end
+      end)
   end
-
-  lines[#lines + 1] = "DRAFTS"
-  for _, group in ipairs(draftGroups) do
-    lines[#lines + 1] = group.real
-  end
-
-  if #indices == 0 and #draftGroups == 0 then
-    return
-  end
-
-  local path = os.tmpname()
-  local file = io.open(path, "w")
-  file:write(table.concat(lines, "\n"), "\n")
-  file:close()
-
-  -- Strip Claude Code's system prompt, tools, CLAUDE.md, skills and MCP config:
-  -- ~34.6k tokens per call down to ~3.5k, and thinking off drops output to ~36.
-  local command = table.concat({
-    "MAX_THINKING_TOKENS=0",
-    ("%q"):format(CLAUDE),
-    "-p --model " .. cfg.ai.model,
-    "--system-prompt " .. ("%q"):format(SYSTEM_PROMPT),
-    "--json-schema " .. ("%q"):format(SCHEMA),
-    "--effort low --safe-mode --strict-mcp-config --disable-slash-commands",
-    "--setting-sources ''",
-    "--disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite",
-    "--no-session-persistence",
-    "< " .. ("%q"):format(path),
-  }, " ")
-
-  task = hs.task.new("/bin/zsh", function(code, stdout)
-    task = nil
-    os.remove(path)
-    if code ~= 0 or not parseVariants(stdout, indices, draftGroups) then
-      hs.alert.show("Typo AI unavailable — using local typos", 1)
-    end
-  end, { "-c", command })
-
-  task:start()
 end
 
 local function finish(message)
   running = false
   timer = nil
-  if task then
-    task:terminate()
-    task = nil
-  end
   hs.alert.show(message, 1)
 end
 
@@ -525,13 +470,7 @@ local function runChunk(index)
   end
 
   local chunk = chunks[index]
-  local wrong = nil
-  if chunk.mistake then
-    wrong = variants[index]
-    if not wrong or wrong == chunk.core then
-      wrong = localTypo(chunk.core)
-    end
-  end
+  local wrong = chunk.mistake and localTypo(chunk.core) or nil
   if not wrong or wrong == chunk.core then
     typeCorrect(chunk, index)
     return
@@ -611,11 +550,10 @@ function M.start()
 
   loadConfig()
   chunks = buildChunks(text)
-  variants = {}
   drift = 1
   pending = nil
   running = true
-  requestVariants(planDrafts())
+  requestDrafts(planDrafts())
 
   local startDelay = cfg.pauses.startDelay
   hs.alert.show(("Typing %d chunks in %.1fs — focus the target field"):format(#chunks, startDelay), startDelay)

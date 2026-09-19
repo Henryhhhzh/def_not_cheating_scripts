@@ -579,7 +579,7 @@ footer.foot code {
         </div>
         <label class="hint" for="sample" style="border-top:1px solid var(--line);display:block">Preview text</label>
         <textarea class="sample mono" id="sample" spellcheck="false"></textarea>
-        <p class="hint">The preview uses the built-in typo generator. When the script runs for real it also pulls variants from Claude, which reword as well as mistype.</p>
+        <p class="hint">Typos here are the real generator, the same one the script uses. Sentence drafts are a stand-in, because the page cannot reach the local model — the script gets better ones from Ollama.</p>
       </section>
 
       <section class="panel" aria-labelledby="cfg-h">
@@ -620,7 +620,7 @@ const DEFAULTS = {
               noticeMin: 0.4, noticeMax: 1.6, returnMin: 0.15, returnMax: 0.5,
               kinds: { transpose: true, drop: true, double: true, adjacent: true } },
   drafts:   { enabled: true, chance: 0.7, minLength: 40 },
-  ai:       { enabled: true, model: "claude-haiku-4-5-20251001", maxLinesPerCall: 40 }
+  ai:       { enabled: true, url: "http://127.0.0.1:11434/api/generate", model: "qwen2.5:0.5b", temperature: 0.9 }
 };
 
 const PRESETS = {
@@ -724,7 +724,7 @@ const SPEC = [
     { p: "mistakes.kinds.double", label: "Doubled letter", ex: ["hello", "helllo"] },
     { p: "mistakes.kinds.adjacent", label: "Adjacent key", ex: ["brown", "beown"] }
   ]},
-  { name: "First drafts", blurb: "Whole sentences typed a rougher way, then rewritten properly later. Needs Claude; the preview uses a stand-in.", items: [
+  { name: "First drafts", blurb: "Whole sentences typed a rougher way, then rewritten properly later. Needs the local model; the preview uses a stand-in.", items: [
     { kind: "toggle", p: "drafts.enabled", label: "Draft sentences first",
       note: "Types a plainer version of a sentence, carries on, then goes back and replaces it with the real one." },
     { kind: "range", p: "drafts.chance", label: "Chance per paragraph",
@@ -734,13 +734,16 @@ const SPEC = [
       note: "Shorter sentences are left alone; there is nothing to reword.",
       min: 15, max: 120, step: 5, fmt: v => v.toFixed(0) + " ch" }
   ]},
-  { name: "Claude", blurb: "Optional. Adds rewordings the local generator cannot produce.", items: [
-    { kind: "toggle", p: "ai.enabled", label: "Use Claude for variants", note: "Falls back to the local generator whenever it is off, slow, or unavailable." },
+  { name: "Local model", blurb: "Runs on your Mac through Ollama. No network, no account, nothing metered.", items: [
+    { kind: "toggle", p: "ai.enabled", label: "Use the local model",
+      note: "Only drafts sentences. Typos always come from the built-in generator, which is faster and more plausible than a model." },
     { kind: "select", p: "ai.model", label: "Model", options: [
-      ["claude-haiku-4-5-20251001", "Haiku 4.5 — fastest, cheapest"],
-      ["claude-sonnet-5", "Sonnet 5 — better variants"] ] },
-    { kind: "range", p: "ai.maxLinesPerCall", label: "Variants per paste", note: "Caps how many mistakes are sent in the single batched request.",
-      min: 5, max: 100, step: 5, fmt: v => v.toFixed(0) }
+      ["qwen2.5:0.5b", "Qwen2.5 0.5B — 400MB, ~0.2s"],
+      ["qwen2.5:1.5b", "Qwen2.5 1.5B — 1GB, steadier"],
+      ["llama3.2:1b", "Llama 3.2 1B — 1.3GB"] ] },
+    { kind: "range", p: "ai.temperature", label: "Temperature",
+      note: "Higher wanders further from the original wording.",
+      min: 0.1, max: 1.5, step: 0.05, fmt: v => v.toFixed(2) }
   ]}
 ];
 
