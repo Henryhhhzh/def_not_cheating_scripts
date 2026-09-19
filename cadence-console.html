@@ -619,6 +619,7 @@ const DEFAULTS = {
               arrowMin: 0.012, arrowMax: 0.035,
               noticeMin: 0.4, noticeMax: 1.6, returnMin: 0.15, returnMax: 0.5,
               kinds: { transpose: true, drop: true, double: true, adjacent: true } },
+  drafts:   { enabled: true, chance: 0.7, minLength: 40 },
   ai:       { enabled: true, model: "claude-haiku-4-5-20251001", maxLinesPerCall: 40 }
 };
 
@@ -647,11 +648,12 @@ const PRESETS = {
   },
   clean: {
     mistakes: { chance: 0 },
+    drafts: { enabled: false },
     ai: { enabled: false }
   }
 };
 
-const SAMPLE = "Hi there,\n\nThanks for getting back to me about the timeline. I had a look at the documents you sent over and most of it makes sense.\n\nThere are a couple of things I wanted to check before we move forward.\n\nThanks,\nHenry";
+const SAMPLE = "Hi there,\n\nThanks for getting back to me about the timeline. This raised quite a conundrum for one such as himself.\n\nThe deadline is no longer realistic given the volume of outstanding work. I wanted to flag a couple of concerns before we proceed.\n\nThanks,\nHenry";
 
 const SPEC = [
   { name: "Speed", blurb: "How fast keys land, and how much that varies stroke to stroke.", items: [
@@ -721,6 +723,16 @@ const SPEC = [
     { p: "mistakes.kinds.drop", label: "Dropped letter", ex: ["quick", "quik"] },
     { p: "mistakes.kinds.double", label: "Doubled letter", ex: ["hello", "helllo"] },
     { p: "mistakes.kinds.adjacent", label: "Adjacent key", ex: ["brown", "beown"] }
+  ]},
+  { name: "First drafts", blurb: "Whole sentences typed a rougher way, then rewritten properly later. Needs Claude; the preview uses a stand-in.", items: [
+    { kind: "toggle", p: "drafts.enabled", label: "Draft sentences first",
+      note: "Types a plainer version of a sentence, carries on, then goes back and replaces it with the real one." },
+    { kind: "range", p: "drafts.chance", label: "Chance per paragraph",
+      note: "At most one sentence per paragraph is ever drafted.",
+      min: 0, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + "%" },
+    { kind: "range", p: "drafts.minLength", label: "Minimum sentence",
+      note: "Shorter sentences are left alone; there is nothing to reword.",
+      min: 15, max: 120, step: 5, fmt: v => v.toFixed(0) + " ch" }
   ]},
   { name: "Claude", blurb: "Optional. Adds rewordings the local generator cannot produce.", items: [
     { kind: "toggle", p: "ai.enabled", label: "Use Claude for variants", note: "Falls back to the local generator whenever it is off, slow, or unavailable." },
@@ -991,7 +1003,7 @@ function buildChunks(text) {
       core += tail + words[pos].word;
       tail = words[pos].space;
       pos++;
-    } while (pos <= last && !tail.includes("\n"));
+    } while (pos <= last && !tail.includes("\n") && !/[.!?]["')\]]*$/.test(core));
     if (core !== "" || tail !== "") {
       out.push({
         core, tail,
@@ -1050,6 +1062,69 @@ function nudgeDrift() {
   if (amount <= 0) { drift = 1; return; }
   drift += rand(-amount / 3, amount / 3);
   drift = Math.max(1 - amount, Math.min(1 + amount, drift));
+}
+
+// The preview cannot reach Claude, so drafts here come from a small
+// substitution table. The script itself gets far better ones from the model.
+const PLAIN = {
+  conundrum: "problem", reluctant: "unwilling", realistic: "doable", proceed: "go ahead",
+  outstanding: "left over", concerns: "worries", volume: "amount", commit: "agree",
+  particular: "certain", regarding: "about", additional: "extra", sufficient: "enough",
+  numerous: "lots of", insufficient: "not enough", ascertain: "find out", endeavour: "try",
+  approximately: "about", subsequently: "later", demonstrate: "show", utilise: "use",
+  flag: "mention", timeline: "schedule", himself: "him"
+};
+const FILLER = [/\bquite\b\s*/gi, /\brather\b\s*/gi, /\bindeed\b\s*/gi, /\bsomewhat\b\s*/gi, /\bone such as\b/gi];
+
+function roughDraft(real) {
+  let out = real, changed = false;
+  for (const [formal, plain] of Object.entries(PLAIN)) {
+    const re = new RegExp("\\b" + formal + "\\b", "gi");
+    if (re.test(out)) { out = out.replace(re, plain); changed = true; }
+  }
+  for (const f of FILLER) {
+    if (f.test(out)) { out = out.replace(f, ""); changed = true; }
+  }
+  out = out.replace(/\s+/g, " ").trim();
+  return changed && out !== real ? out : null;
+}
+
+function planDrafts(chunks) {
+  const plan = new Map();
+  if (!cfg.drafts.enabled) return plan;
+
+  const groups = [];
+  let first = 0;
+  chunks.forEach((c, i) => {
+    if (/[.!?]["')\]]*$/.test(c.core) || /\n\s*\n/.test(c.tail) || i === chunks.length - 1) {
+      groups.push({ first, last: i });
+      first = i + 1;
+    }
+  });
+
+  const byParagraph = new Map();
+  let paragraph = 0;
+  for (const g of groups) {
+    let real = "";
+    for (let i = g.first; i < g.last; i++) real += chunks[i].core + chunks[i].tail;
+    real += chunks[g.last].core;
+    g.real = real;
+    g.tail = chunks[g.last].tail;
+
+    if (!real.includes("\n") && real.length >= cfg.drafts.minLength) {
+      if (!byParagraph.has(paragraph)) byParagraph.set(paragraph, []);
+      byParagraph.get(paragraph).push(g);
+    }
+    if (/\n\s*\n/.test(g.tail)) paragraph++;
+  }
+
+  for (const candidates of byParagraph.values()) {
+    if (Math.random() >= cfg.drafts.chance) continue;
+    const g = candidates[Math.floor(Math.random() * candidates.length)];
+    const text = roughDraft(g.real);
+    if (text) { g.text = text; plan.set(g.first, g); }
+  }
+  return plan;
 }
 
 function delayAfter(ch, chars, i) {
@@ -1123,6 +1198,7 @@ async function play() {
   playBtn.textContent = "Stop";
   const text = sampleBox.value;
   const chunks = buildChunks(text);
+  const plan = planDrafts(chunks);
   sChunks.textContent = chunks.length;
 
   let buf = [], cur = 0, mistakes = 0, pending = null;
@@ -1189,13 +1265,31 @@ async function play() {
 
   await sleep(cfg.pauses.startDelay * 1000);
 
-  for (const [ci, chunk] of chunks.entries()) {
+  let ci = 0;
+  while (ci < chunks.length) {
     if (stop()) break;
+    const chunk = chunks[ci];
     nudgeDrift();
 
     if (ci > 0 && Math.random() < cfg.pauses.thinkChance) {
       await sleep(rand(cfg.pauses.thinkMin, cfg.pauses.thinkMax) * 1000);
       if (stop()) break;
+    }
+
+    const group = plan.get(ci);
+    if (group && !pending) {
+      const start = cur;
+      if (!await typeStr(group.text)) break;
+      pending = {
+        wrong: group.text, correct: group.real, trail: 0, start,
+        length: [...group.text].length,
+        due: group.last + Math.floor(cfg.mistakes.deferMin +
+             Math.random() * (Math.max(cfg.mistakes.deferMin, cfg.mistakes.deferMax) - cfg.mistakes.deferMin + 1))
+      };
+      if (!await typeStr(group.tail)) break;
+      if (!await advance(group.last, group.tail)) break;
+      ci = group.last + 1;
+      continue;
     }
 
     const wrong = chunk.mistake ? localTypo(chunk.core) : null;
@@ -1204,6 +1298,7 @@ async function play() {
     if (!wrong || wrong === chunk.core) {
       if (!await typeStr(chunk.core + chunk.tail)) break;
       if (!await advance(ci, chunk.core + chunk.tail)) break;
+      ci++;
       continue;
     }
 
@@ -1220,6 +1315,7 @@ async function play() {
       };
       if (!await typeStr(chunk.tail)) break;
       if (!await advance(ci, chunk.tail)) break;
+      ci++;
       continue;
     }
 
@@ -1231,6 +1327,7 @@ async function play() {
     if (stop()) break;
     if (!await typeStr(chunk.core + chunk.tail)) break;
     if (!await advance(ci, chunk.core + chunk.tail)) break;
+    ci++;
   }
 
   if (!stop() && pending) await revise();
